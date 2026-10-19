@@ -10,10 +10,21 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Verificar presença do projeto
+      - name: Confirmar que o projeto foi importado
+        shell: bash
         run: |
-          test -f package.json || { echo "::error::O código do projeto ainda não foi importado."; exit 1; }
-          test -f package-lock.json || { echo "::error::package-lock.json ausente."; exit 1; }
+          set -euo pipefail
+          test -f package.json || { echo "::error::Código-fonte ainda não importado"; exit 1; }
+          test -f package-lock.json || { echo "::error::Lockfile ausente"; exit 1; }
+          test -f backend/src/routes/auth.ts || { echo "::error::API de autenticação ausente"; exit 1; }
+      - name: Impedir tokens de demonstração na autenticação
+        shell: bash
+        run: |
+          set -euo pipefail
+          if grep -R -n -E 'setup-dev-token-change-me|JWT_SECRET.*(fallback|default)|password[[:space:]]*===[[:space:]]*["\x27]' backend/src/routes/auth.ts backend/src/middleware/auth.ts; then
+            echo "::error::Possível credencial insegura na autenticação"
+            exit 1
+          fi
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
