@@ -1,5 +1,7 @@
 # Continuidade — validação local e economia de Actions
 
+> Histórico da rodada anterior. A política de gatilhos descrita abaixo foi substituída por execução exclusivamente manual. Consulte VALIDACAO-ECONOMICA.md para a regra vigente.
+
 ## Alterações
 
 - Removido o gatilho push do workflow: não há mais validação duplicada por push e PR.
