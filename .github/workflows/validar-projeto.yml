@@ -1,12 +1,27 @@
 name: Validar projeto
 on:
-  push:
-    branches: [main, 'desenvolvimento/**']
   pull_request:
+    branches: [main]
+    types: [opened, reopened, synchronize, ready_for_review, labeled]
+  workflow_dispatch:
+    inputs:
+      navegador:
+        description: Executar também Chromium e R2 local
+        type: boolean
+        default: false
+concurrency:
+  group: validar-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
 permissions:
   contents: read
 jobs:
   validar:
+    # Drafts run only after an explicit manual request; ready PRs always validate.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.action == 'labeled' && github.event.label.name == 'validar-agora') ||
+      (github.event.action != 'labeled' && github.event.pull_request.draft == false)
+    timeout-minutes: 15
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -31,15 +46,17 @@ jobs:
       - name: Validar migrações no D1 local
         run: npm run db:migrate
       - name: Validar empacotamento sem publicar
-        run: npx wrangler deploy --dry-run --outdir /tmp/catalogo-worker
+        run: npx wrangler deploy --dry-run --env='' --outdir /tmp/catalogo-worker
         env:
           WRANGLER_SEND_METRICS: false
       - name: Instalar navegador de testes
+        if: github.event_name == 'pull_request' || inputs.navegador
         run: npx playwright install --with-deps chromium
       - name: Validar fluxos no navegador e R2 local
+        if: github.event_name == 'pull_request' || inputs.navegador
         run: npm run test:browser
       - name: Preservar evidências de validação
-        if: always()
+        if: always() && (github.event_name == 'pull_request' || inputs.navegador)
         uses: actions/upload-artifact@v4
         with:
           name: validacao-navegador

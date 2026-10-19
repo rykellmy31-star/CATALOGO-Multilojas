@@ -18,7 +18,8 @@
     "db:seed": "wrangler d1 execute catalogos_db --file=./database/seed.sql --local",
     "test": "vitest run",
     "lint": "eslint . --ext .ts,.tsx",
-    "test:browser": "node scripts/test-browser.mjs"
+    "test:browser": "node scripts/test-browser.mjs",
+    "validate": "python3 scripts/auditar-seguranca.py && npm test && npm run build"
   },
   "devDependencies": {
     "concurrently": "^8.2.2",
