@@ -1,0 +1,5 @@
+JWT_SECRET=gere_um_secret_forte_aqui_com_64_caracteres_minimo
+SUPER_ADMIN_SETUP_TOKEN=setup-dev-token-change-me
+OPENAI_API_KEY=sk-proj-xxxxxxxxxxxxxxxx
+AI_PROVIDER=openai
+ENVIRONMENT=development

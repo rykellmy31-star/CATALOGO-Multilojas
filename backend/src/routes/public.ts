@@ -1,0 +1,233 @@
+import { Hono } from 'hono';
+
+type Env = {
+  Bindings: {
+    DB: D1Database;
+    STORAGE: R2Bucket;
+    R2_PUBLIC_URL?: string;
+  };
+};
+
+const publicRoutes = new Hono<Env>();
+
+// GET /api/public/stores/:slug - dados públicos da loja
+publicRoutes.get('/stores/:slug', async (c) => {
+  const slug = c.req.param('slug');
+  
+  const store = await c.env.DB.prepare(
+    'SELECT id, name, slug, description, logo_url, banner_url, primary_color, secondary_color, accent_color, address, city, state, phone, whatsapp, email, instagram, facebook, website, opening_hours, seo_title, seo_description FROM stores WHERE slug = ? AND status = "active"'
+  ).bind(slug).first() as any;
+
+  if (!store) return c.json({ error: 'Loja não encontrada' }, 404);
+
+  // Banners ativos
+  const banners = await c.env.DB.prepare('SELECT * FROM banners WHERE store_id = ? AND is_active = 1 ORDER BY sort_order').bind(store.id).all();
+  
+  // Categorias
+  const categories = await c.env.DB.prepare('SELECT * FROM categories WHERE store_id = ? AND is_active = 1 ORDER BY sort_order, name').bind(store.id).all();
+
+  // Produtos em destaque
+  const featured = await c.env.DB.prepare(`
+    SELECT p.*, pi.url as primary_image, c.name as category_name
+    FROM products p
+    LEFT JOIN product_images pi ON pi.product_id = p.id AND pi.is_primary = 1
+    LEFT JOIN categories c ON p.category_id = c.id
+    WHERE p.store_id = ? AND p.status = 'published' AND p.is_featured = 1
+    ORDER BY p.sort_order, p.created_at DESC LIMIT 8
+  `).bind(store.id).all();
+
+  // Produtos em promoção
+  const onSale = await c.env.DB.prepare(`
+    SELECT p.*, pi.url as primary_image, c.name as category_name
+    FROM products p
+    LEFT JOIN product_images pi ON pi.product_id = p.id AND pi.is_primary = 1
+    LEFT JOIN categories c ON p.category_id = c.id
+    WHERE p.store_id = ? AND p.status = 'published' AND p.is_on_sale = 1
+    ORDER BY p.created_at DESC LIMIT 8
+  `).bind(store.id).all();
+
+  // Registrar visita (fire and forget)
+  c.env.DB.prepare(
+    'INSERT INTO analytics_events (id, store_id, event_type, session_id, ip_hash) VALUES (?, ?, ?, ?, ?)'
+  ).bind(crypto.randomUUID(), store.id, 'catalog_view', c.req.header('X-Session-Id') || 'anon', 'hash').run().catch(()=>{});
+
+  return c.json({
+    store,
+    banners: (banners as any).results || banners,
+    categories: (categories as any).results || categories,
+    featured: (featured as any).results || featured,
+    onSale: (onSale as any).results || onSale
+  });
+});
+
+// GET /api/public/stores/:slug/products - lista produtos públicos com filtros
+publicRoutes.get('/stores/:slug/products', async (c) => {
+  const slug = c.req.param('slug');
+  const q = c.req.query('q');
+  const category = c.req.query('category');
+  const brand = c.req.query('brand');
+  const minPrice = c.req.query('minPrice');
+  const maxPrice = c.req.query('maxPrice');
+  const sort = c.req.query('sort') || 'newest'; // newest, price_asc, price_desc, name
+  const page = parseInt(c.req.query('page') || '1');
+  const limit = Math.min(parseInt(c.req.query('limit') || '12'), 50);
+  const offset = (page - 1) * limit;
+
+  const store = await c.env.DB.prepare('SELECT id FROM stores WHERE slug = ? AND status = "active"').bind(slug).first() as any;
+  if (!store) return c.json({ error: 'Loja não encontrada' }, 404);
+
+  let query = `
+    SELECT p.*, pi.url as primary_image, c.name as category_name, c.slug as category_slug
+    FROM products p
+    LEFT JOIN product_images pi ON pi.product_id = p.id AND pi.is_primary = 1
+    LEFT JOIN categories c ON p.category_id = c.id
+    WHERE p.store_id = ? AND p.status = 'published'
+  `;
+  const params: any[] = [store.id];
+
+  if (q) {
+    query += ' AND (p.name LIKE ? OR p.description LIKE ? OR p.sku LIKE ? OR p.short_description LIKE ?)';
+    params.push(`%${q}%`, `%${q}%`, `%${q}%`, `%${q}%`);
+  }
+  if (category) {
+    query += ' AND c.slug = ?';
+    params.push(category);
+  }
+  if (brand) {
+    query += ' AND p.brand_id = (SELECT id FROM brands WHERE slug = ? AND store_id = ? LIMIT 1)';
+    params.push(brand, store.id);
+  }
+  if (minPrice) {
+    query += ' AND p.price >= ?';
+    params.push(parseFloat(minPrice));
+  }
+  if (maxPrice) {
+    query += ' AND p.price <= ?';
+    params.push(parseFloat(maxPrice));
+  }
+
+  // Ordenação
+  switch (sort) {
+    case 'price_asc': query += ' ORDER BY p.price ASC'; break;
+    case 'price_desc': query += ' ORDER BY p.price DESC'; break;
+    case 'name': query += ' ORDER BY p.name ASC'; break;
+    default: query += ' ORDER BY p.created_at DESC';
+  }
+
+  query += ' LIMIT ? OFFSET ?';
+  params.push(limit, offset);
+
+  const products = await c.env.DB.prepare(query).bind(...params).all();
+
+  // Count
+  let countQuery = 'SELECT COUNT(*) as count FROM products p LEFT JOIN categories c ON p.category_id = c.id WHERE p.store_id = ? AND p.status = "published"';
+  const countParams: any[] = [store.id];
+  if (q) {
+    countQuery += ' AND (p.name LIKE ? OR p.description LIKE ? OR p.sku LIKE ? OR p.short_description LIKE ?)';
+    countParams.push(`%${q}%`, `%${q}%`, `%${q}%`, `%${q}%`);
+  }
+  if (category) { countQuery += ' AND c.slug = ?'; countParams.push(category); }
+  if (minPrice) { countQuery += ' AND p.price >= ?'; countParams.push(parseFloat(minPrice)); }
+  if (maxPrice) { countQuery += ' AND p.price <= ?'; countParams.push(parseFloat(maxPrice)); }
+
+  const total = await c.env.DB.prepare(countQuery).bind(...countParams).first() as any;
+
+  return c.json({
+    products: (products as any).results || products,
+    pagination: { page, limit, total: total?.count || 0, pages: Math.ceil((total?.count || 0) / limit) }
+  });
+});
+
+// GET /api/public/stores/:slug/products/:productSlug - produto individual
+publicRoutes.get('/stores/:slug/products/:productSlug', async (c) => {
+  const slug = c.req.param('slug');
+  const productSlug = c.req.param('productSlug');
+
+  const store = await c.env.DB.prepare('SELECT id, name, slug, whatsapp, phone FROM stores WHERE slug = ? AND status = "active"').bind(slug).first() as any;
+  if (!store) return c.json({ error: 'Loja não encontrada' }, 404);
+
+  const product = await c.env.DB.prepare(`
+    SELECT p.*, c.name as category_name, c.slug as category_slug, b.name as brand_name
+    FROM products p
+    LEFT JOIN categories c ON p.category_id = c.id
+    LEFT JOIN brands b ON p.brand_id = b.id
+    WHERE p.store_id = ? AND p.slug = ? AND p.status = 'published'
+  `).bind(store.id, productSlug).first() as any;
+
+  if (!product) return c.json({ error: 'Produto não encontrado' }, 404);
+
+  const images = await c.env.DB.prepare('SELECT * FROM product_images WHERE product_id = ? ORDER BY is_primary DESC, sort_order').bind(product.id).all();
+
+  // Produtos relacionados (mesma categoria)
+  const related = await c.env.DB.prepare(`
+    SELECT p.*, pi.url as primary_image FROM products p
+    LEFT JOIN product_images pi ON pi.product_id = p.id AND pi.is_primary = 1
+    WHERE p.store_id = ? AND p.category_id = ? AND p.id != ? AND p.status = 'published'
+    ORDER BY RANDOM() LIMIT 4
+  `).bind(store.id, product.category_id, product.id).all();
+
+  // Incrementa views
+  await c.env.DB.prepare('UPDATE products SET views = views + 1 WHERE id = ?').bind(product.id).run().catch(()=>{});
+  
+  await c.env.DB.prepare(
+    'INSERT INTO analytics_events (id, store_id, product_id, event_type, session_id) VALUES (?, ?, ?, ?, ?)'
+  ).bind(crypto.randomUUID(), store.id, product.id, 'product_view', c.req.header('X-Session-Id') || 'anon').run().catch(()=>{});
+
+  // WhatsApp link helper
+  const whatsappNumber = store.whatsapp ? store.whatsapp.replace(/\D/g, '') : '';
+  const whatsappMessage = `Olá! Tenho interesse no produto: ${product.name} (Código: ${product.sku || product.id.slice(0,8)}) - Preço: R$ ${Number(product.price).toFixed(2)} - Link: /loja/${slug}/produto/${product.slug}`;
+
+  return c.json({
+    product,
+    images: (images as any).results || images,
+    related: (related as any).results || related,
+    store: { name: store.name, slug: store.slug, whatsapp: store.whatsapp, phone: store.phone },
+    whatsappLink: whatsappNumber ? `https://wa.me/${whatsappNumber}?text=${encodeURIComponent(whatsappMessage)}` : null
+  });
+});
+
+// POST /api/public/stores/:slug/analytics - registrar eventos
+publicRoutes.post('/stores/:slug/analytics', async (c) => {
+  const slug = c.req.param('slug');
+  const body = await c.req.json() as any;
+  const { event_type, product_id, metadata } = body;
+
+  const store = await c.env.DB.prepare('SELECT id FROM stores WHERE slug = ?').bind(slug).first() as any;
+  if (!store) return c.json({ error: 'Loja não encontrada' }, 404);
+
+  // Incrementa clicks se for whatsapp_click
+  if (event_type === 'whatsapp_click' && product_id) {
+    await c.env.DB.prepare('UPDATE products SET clicks = clicks + 1 WHERE id = ?').bind(product_id).run().catch(()=>{});
+  }
+
+  await c.env.DB.prepare(
+    'INSERT INTO analytics_events (id, store_id, product_id, event_type, session_id, metadata) VALUES (?, ?, ?, ?, ?, ?)'
+  ).bind(crypto.randomUUID(), store.id, product_id || null, event_type, c.req.header('X-Session-Id') || 'anon', metadata ? JSON.stringify(metadata) : null).run().catch(()=>{});
+
+  return c.json({ success: true });
+});
+
+// GET /api/public/search - busca global (opcional)
+publicRoutes.get('/search', async (c) => {
+  const q = c.req.query('q');
+  if (!q || q.length < 2) return c.json({ products: [] });
+
+  const products = await c.env.DB.prepare(`
+    SELECT p.*, s.name as store_name, s.slug as store_slug, pi.url as primary_image
+    FROM products p
+    JOIN stores s ON p.store_id = s.id
+    LEFT JOIN product_images pi ON pi.product_id = p.id AND pi.is_primary = 1
+    WHERE p.status = 'published' AND s.status = 'active' AND (p.name LIKE ? OR p.description LIKE ?)
+    ORDER BY p.views DESC LIMIT 10
+  `).bind(`%${q}%`, `%${q}%`).all();
+
+  return c.json({ products: (products as any).results || products });
+});
+
+// GET /api/public/platform - info pública da plataforma
+publicRoutes.get('/platform', async (c) => {
+  const config = await c.env.DB.prepare('SELECT platform_name, logo_url, primary_color, footer_text FROM platform_config LIMIT 1').first();
+  return c.json({ platform: config });
+});
+
+export default publicRoutes;

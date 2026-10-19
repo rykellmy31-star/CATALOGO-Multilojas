@@ -1,0 +1,657 @@
+import { Hono } from 'hono';
+import { authMiddleware, requireRole } from '../middleware/auth.js';
+import { zValidator } from '../middleware/validation.js';
+import { createProductSchema, createCategorySchema, createBrandSchema, createBannerSchema } from '../utils/validation.js';
+import { slugify } from '../utils/slug.js';
+import { generateProductImage, generateProductDescription, AI_STYLES } from '../services/ai.js';
+
+type Env = {
+  Bindings: {
+    DB: D1Database;
+    STORAGE: R2Bucket;
+    STORAGE_PUBLIC: R2Bucket;
+    JWT_SECRET: string;
+    OPENAI_API_KEY?: string;
+    AI_PROVIDER?: string;
+    AI_ENABLED?: string;
+    R2_PUBLIC_URL?: string;
+  };
+  Variables: { user: any; storeId: string };
+};
+
+const store = new Hono<Env>();
+
+store.use('*', authMiddleware as any);
+store.use('*', requireRole('store_admin', 'super_admin') as any);
+
+// Helper: obtém storeId seguro (do token ou query para super_admin)
+function getStoreId(c: any): string {
+  const user = c.get('user');
+  if (user.role === 'super_admin') {
+    const queryStore = c.req.query('storeId');
+    if (queryStore) return queryStore;
+  }
+  return c.get('storeId') || user.storeId;
+}
+
+// =====================
+// DASHBOARD
+// =====================
+store.get('/dashboard', async (c) => {
+  const storeId = getStoreId(c);
+  const db = c.env.DB;
+
+  const totalProducts = await db.prepare('SELECT COUNT(*) as count FROM products WHERE store_id = ?').bind(storeId).first() as any;
+  const published = await db.prepare("SELECT COUNT(*) as count FROM products WHERE store_id = ? AND status = 'published'").bind(storeId).first() as any;
+  const draft = await db.prepare("SELECT COUNT(*) as count FROM products WHERE store_id = ? AND status = 'draft'").bind(storeId).first() as any;
+  const outOfStock = await db.prepare("SELECT COUNT(*) as count FROM products WHERE store_id = ? AND status = 'out_of_stock'").bind(storeId).first() as any;
+  const featured = await db.prepare('SELECT COUNT(*) as count FROM products WHERE store_id = ? AND is_featured = 1').bind(storeId).first() as any;
+  const onSale = await db.prepare('SELECT COUNT(*) as count FROM products WHERE store_id = ? AND is_on_sale = 1').bind(storeId).first() as any;
+  
+  const visits = await db.prepare("SELECT COUNT(*) as count FROM analytics_events WHERE store_id = ? AND event_type = 'catalog_view'").bind(storeId).first() as any;
+  const clicks = await db.prepare("SELECT COUNT(*) as count FROM analytics_events WHERE store_id = ? AND event_type = 'whatsapp_click'").bind(storeId).first() as any;
+
+  const topProducts = await db.prepare(`
+    SELECT p.id, p.name, p.slug, p.views, p.clicks, pi.url as image
+    FROM products p
+    LEFT JOIN product_images pi ON pi.product_id = p.id AND pi.is_primary = 1
+    WHERE p.store_id = ? ORDER BY p.views DESC LIMIT 5
+  `).bind(storeId).all();
+
+  const recentProducts = await db.prepare('SELECT id, name, status, created_at FROM products WHERE store_id = ? ORDER BY created_at DESC LIMIT 5').bind(storeId).all();
+
+  return c.json({
+    stats: {
+      totalProducts: totalProducts?.count || 0,
+      published: published?.count || 0,
+      draft: draft?.count || 0,
+      outOfStock: outOfStock?.count || 0,
+      featured: featured?.count || 0,
+      onSale: onSale?.count || 0,
+      visits: visits?.count || 0,
+      clicks: clicks?.count || 0,
+    },
+    topProducts: (topProducts as any).results || topProducts,
+    recentProducts: (recentProducts as any).results || recentProducts
+  });
+});
+
+// =====================
+// PRODUCTS
+// =====================
+store.get('/products', async (c) => {
+  const storeId = getStoreId(c);
+  const q = c.req.query('q');
+  const category = c.req.query('category');
+  const status = c.req.query('status');
+  const featured = c.req.query('featured');
+  const page = parseInt(c.req.query('page') || '1');
+  const limit = Math.min(parseInt(c.req.query('limit') || '20'), 100);
+  const offset = (page - 1) * limit;
+
+  let query = `
+    SELECT p.*, c.name as category_name, c.slug as category_slug, b.name as brand_name,
+      (SELECT url FROM product_images WHERE product_id = p.id AND is_primary=1 LIMIT 1) as primary_image,
+      (SELECT COUNT(*) FROM product_images WHERE product_id = p.id) as images_count
+    FROM products p
+    LEFT JOIN categories c ON p.category_id = c.id
+    LEFT JOIN brands b ON p.brand_id = b.id
+    WHERE p.store_id = ?
+  `;
+  const params: any[] = [storeId];
+
+  if (q) {
+    query += ' AND (p.name LIKE ? OR p.sku LIKE ? OR p.description LIKE ?)';
+    params.push(`%${q}%`, `%${q}%`, `%${q}%`);
+  }
+  if (category) {
+    query += ' AND p.category_id = ?';
+    params.push(category);
+  }
+  if (status && status !== 'all') {
+    query += ' AND p.status = ?';
+    params.push(status);
+  }
+  if (featured === 'true') {
+    query += ' AND p.is_featured = 1';
+  }
+
+  query += ' ORDER BY p.created_at DESC LIMIT ? OFFSET ?';
+  params.push(limit, offset);
+
+  const products = await c.env.DB.prepare(query).bind(...params).all();
+  
+  // Total count
+  let countQuery = 'SELECT COUNT(*) as count FROM products WHERE store_id = ?';
+  const countParams: any[] = [storeId];
+  if (q) {
+    countQuery += ' AND (name LIKE ? OR sku LIKE ? OR description LIKE ?)';
+    countParams.push(`%${q}%`, `%${q}%`, `%${q}%`);
+  }
+  if (status && status !== 'all') {
+    countQuery += ' AND status = ?';
+    countParams.push(status);
+  }
+  const total = await c.env.DB.prepare(countQuery).bind(...countParams).first() as any;
+
+  return c.json({
+    products: (products as any).results || products,
+    pagination: { page, limit, total: total?.count || 0, pages: Math.ceil((total?.count || 0) / limit) }
+  });
+});
+
+store.get('/products/:id', async (c) => {
+  const storeId = getStoreId(c);
+  const id = c.req.param('id');
+  
+  const product = await c.env.DB.prepare('SELECT * FROM products WHERE id = ? AND store_id = ?').bind(id, storeId).first() as any;
+  if (!product) return c.json({ error: 'Produto não encontrado' }, 404);
+
+  const images = await c.env.DB.prepare('SELECT * FROM product_images WHERE product_id = ? ORDER BY sort_order, created_at').bind(id).all();
+  
+  return c.json({ product, images: (images as any).results || images });
+});
+
+store.post('/products', zValidator('json', createProductSchema), async (c) => {
+  const storeId = getStoreId(c);
+  const data = c.req.valid('json' as any) as any;
+  const user = c.get('user');
+
+  let slug = data.slug ? slugify(data.slug) : slugify(data.name);
+  const existingSlug = await c.env.DB.prepare('SELECT id FROM products WHERE store_id = ? AND slug = ?').bind(storeId, slug).first();
+  if (existingSlug) slug = `${slug}-${Date.now().toString(36).slice(-4)}`;
+
+  const productId = crypto.randomUUID();
+
+  await c.env.DB.prepare(`
+    INSERT INTO products (id, store_id, sku, name, slug, short_description, description, price, original_price, promotional_price, category_id, brand_id, status, is_featured, is_on_sale, stock_quantity, dimensions, technical_specs, variations, published_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).bind(
+    productId, storeId, data.sku || null, data.name, slug, data.short_description || null,
+    data.description || null, data.price, data.original_price || null, data.promotional_price || null,
+    data.category_id || null, data.brand_id || null, data.status || 'draft',
+    data.is_featured ? 1 : 0, data.is_on_sale ? 1 : 0, data.stock_quantity || 0,
+    data.dimensions || null, data.technical_specs || null, data.variations || null,
+    data.status === 'published' ? new Date().toISOString() : null
+  ).run();
+
+  // Imagens
+  if (data.images && Array.isArray(data.images)) {
+    for (let i = 0; i < data.images.length; i++) {
+      await c.env.DB.prepare(
+        'INSERT INTO product_images (id, product_id, store_id, url, is_primary, sort_order) VALUES (?, ?, ?, ?, ?, ?)'
+      ).bind(crypto.randomUUID(), productId, storeId, data.images[i], i === 0 ? 1 : 0, i).run();
+    }
+  }
+
+  await c.env.DB.prepare(
+    'INSERT INTO audit_logs (user_id, store_id, action, entity_type, entity_id, details) VALUES (?, ?, ?, ?, ?, ?)'
+  ).bind(user.userId, storeId, 'create_product', 'product', productId, JSON.stringify({ name: data.name })).run().catch(()=>{});
+
+  const product = await c.env.DB.prepare('SELECT * FROM products WHERE id = ?').bind(productId).first();
+  return c.json({ product, message: 'Produto criado com sucesso!' }, 201);
+});
+
+store.put('/products/:id', zValidator('json', createProductSchema.partial()), async (c) => {
+  const storeId = getStoreId(c);
+  const id = c.req.param('id');
+  const data = c.req.valid('json' as any) as any;
+  const user = c.get('user');
+
+  const existing = await c.env.DB.prepare('SELECT * FROM products WHERE id = ? AND store_id = ?').bind(id, storeId).first() as any;
+  if (!existing) return c.json({ error: 'Produto não encontrado' }, 404);
+
+  const updates: string[] = [];
+  const params: any[] = [];
+  const allowed = ['sku','name','short_description','description','price','original_price','promotional_price','category_id','brand_id','status','stock_quantity','dimensions','technical_specs','variations'];
+  
+  for (const key of allowed) {
+    if (data[key] !== undefined) {
+      updates.push(`${key} = ?`);
+      params.push(data[key]);
+    }
+  }
+  if (data.is_featured !== undefined) { updates.push('is_featured = ?'); params.push(data.is_featured ? 1 : 0); }
+  if (data.is_on_sale !== undefined) { updates.push('is_on_sale = ?'); params.push(data.is_on_sale ? 1 : 0); }
+  if (data.slug) { updates.push('slug = ?'); params.push(slugify(data.slug)); }
+  else if (data.name && data.name !== existing.name) { updates.push('slug = ?'); params.push(slugify(data.name)); }
+  
+  if (data.status === 'published' && existing.status !== 'published') {
+    updates.push("published_at = datetime('now')");
+  }
+  
+  if (updates.length === 0 && !data.images) return c.json({ error: 'Nenhum campo para atualizar' }, 400);
+  
+  if (updates.length > 0) {
+    updates.push("updated_at = datetime('now')");
+    params.push(id, storeId);
+    await c.env.DB.prepare(`UPDATE products SET ${updates.join(', ')} WHERE id = ? AND store_id = ?`).bind(...params).run();
+  }
+
+  // Atualizar imagens se fornecidas
+  if (data.images && Array.isArray(data.images)) {
+    await c.env.DB.prepare('DELETE FROM product_images WHERE product_id = ? AND is_ai_generated = 0').bind(id).run();
+    for (let i = 0; i < data.images.length; i++) {
+      await c.env.DB.prepare(
+        'INSERT INTO product_images (id, product_id, store_id, url, is_primary, sort_order) VALUES (?, ?, ?, ?, ?, ?)'
+      ).bind(crypto.randomUUID(), id, storeId, data.images[i], i === 0 ? 1 : 0, i).run();
+    }
+  }
+
+  await c.env.DB.prepare(
+    'INSERT INTO audit_logs (user_id, store_id, action, entity_type, entity_id, details) VALUES (?, ?, ?, ?, ?, ?)'
+  ).bind(user.userId, storeId, 'update_product', 'product', id, JSON.stringify(data)).run().catch(()=>{});
+
+  const product = await c.env.DB.prepare('SELECT * FROM products WHERE id = ?').bind(id).first();
+  return c.json({ product, message: 'Produto atualizado com sucesso!' });
+});
+
+store.delete('/products/:id', async (c) => {
+  const storeId = getStoreId(c);
+  const id = c.req.param('id');
+  const user = c.get('user');
+
+  const existing = await c.env.DB.prepare('SELECT id FROM products WHERE id = ? AND store_id = ?').bind(id, storeId).first();
+  if (!existing) return c.json({ error: 'Produto não encontrado' }, 404);
+
+  await c.env.DB.prepare('DELETE FROM products WHERE id = ? AND store_id = ?').bind(id, storeId).run();
+  
+  await c.env.DB.prepare(
+    'INSERT INTO audit_logs (user_id, store_id, action, entity_type, entity_id, details) VALUES (?, ?, ?, ?, ?, ?)'
+  ).bind(user.userId, storeId, 'delete_product', 'product', id, JSON.stringify({})).run().catch(()=>{});
+
+  return c.json({ message: 'Produto removido com sucesso' });
+});
+
+// POST /api/store/products/:id/duplicate
+store.post('/products/:id/duplicate', async (c) => {
+  const storeId = getStoreId(c);
+  const id = c.req.param('id');
+  
+  const product = await c.env.DB.prepare('SELECT * FROM products WHERE id = ? AND store_id = ?').bind(id, storeId).first() as any;
+  if (!product) return c.json({ error: 'Produto não encontrado' }, 404);
+
+  const newId = crypto.randomUUID();
+  const newSlug = `${product.slug}-copia-${Date.now().toString(36).slice(-4)}`;
+  const newName = `${product.name} (Cópia)`;
+
+  await c.env.DB.prepare(`
+    INSERT INTO products (id, store_id, sku, name, slug, short_description, description, price, original_price, promotional_price, category_id, brand_id, status, is_featured, is_on_sale, stock_quantity, dimensions, technical_specs, variations)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'draft', ?, ?, ?, ?, ?, ?)
+  `).bind(newId, storeId, product.sku ? `${product.sku}-COPY` : null, newName, newSlug, product.short_description, product.description, product.price, product.original_price, product.promotional_price, product.category_id, product.brand_id, product.is_featured, product.is_on_sale, product.stock_quantity, product.dimensions, product.technical_specs, product.variations).run();
+
+  // Duplica imagens
+  const images = await c.env.DB.prepare('SELECT * FROM product_images WHERE product_id = ?').bind(id).all();
+  for (const img of ((images as any).results || images) as any[]) {
+    await c.env.DB.prepare(
+      'INSERT INTO product_images (id, product_id, store_id, url, is_primary, is_ai_generated, ai_style, sort_order) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
+    ).bind(crypto.randomUUID(), newId, storeId, img.url, img.is_primary, img.is_ai_generated, img.ai_style, img.sort_order).run();
+  }
+
+  const newProduct = await c.env.DB.prepare('SELECT * FROM products WHERE id = ?').bind(newId).first();
+  return c.json({ product: newProduct, message: 'Produto duplicado com sucesso!' }, 201);
+});
+
+// =====================
+// CATEGORIES
+// =====================
+store.get('/categories', async (c) => {
+  const storeId = getStoreId(c);
+  const categories = await c.env.DB.prepare('SELECT * FROM categories WHERE store_id = ? ORDER BY sort_order, name').bind(storeId).all();
+  return c.json({ categories: (categories as any).results || categories });
+});
+
+store.post('/categories', zValidator('json', createCategorySchema), async (c) => {
+  const storeId = getStoreId(c);
+  const data = c.req.valid('json' as any) as any;
+  const slug = data.slug ? slugify(data.slug) : slugify(data.name);
+  
+  const id = crypto.randomUUID();
+  await c.env.DB.prepare('INSERT INTO categories (id, store_id, name, slug, description, parent_id, sort_order) VALUES (?, ?, ?, ?, ?, ?, ?)').bind(id, storeId, data.name, slug, data.description || null, data.parent_id || null, data.sort_order || 0).run();
+  
+  const category = await c.env.DB.prepare('SELECT * FROM categories WHERE id = ?').bind(id).first();
+  return c.json({ category, message: 'Categoria criada!' }, 201);
+});
+
+store.put('/categories/:id', zValidator('json', createCategorySchema.partial()), async (c) => {
+  const storeId = getStoreId(c);
+  const id = c.req.param('id');
+  const data = c.req.valid('json' as any) as any;
+  
+  const updates: string[] = [];
+  const params: any[] = [];
+  if (data.name) { updates.push('name = ?'); params.push(data.name); }
+  if (data.slug) { updates.push('slug = ?'); params.push(slugify(data.slug)); }
+  else if (data.name) { updates.push('slug = ?'); params.push(slugify(data.name)); }
+  if (data.description !== undefined) { updates.push('description = ?'); params.push(data.description); }
+  if (data.sort_order !== undefined) { updates.push('sort_order = ?'); params.push(data.sort_order); }
+  if (data.parent_id !== undefined) { updates.push('parent_id = ?'); params.push(data.parent_id); }
+  if (data.is_active !== undefined) { updates.push('is_active = ?'); params.push(data.is_active ? 1 : 0); }
+  
+  if (updates.length === 0) return c.json({ error: 'Nenhum campo para atualizar' }, 400);
+  updates.push("updated_at = datetime('now')");
+  params.push(id, storeId);
+  
+  await c.env.DB.prepare(`UPDATE categories SET ${updates.join(', ')} WHERE id = ? AND store_id = ?`).bind(...params).run();
+  const category = await c.env.DB.prepare('SELECT * FROM categories WHERE id = ?').bind(id).first();
+  return c.json({ category, message: 'Categoria atualizada!' });
+});
+
+store.delete('/categories/:id', async (c) => {
+  const storeId = getStoreId(c);
+  const id = c.req.param('id');
+  await c.env.DB.prepare('DELETE FROM categories WHERE id = ? AND store_id = ?').bind(id, storeId).run();
+  return c.json({ message: 'Categoria removida' });
+});
+
+// =====================
+// BRANDS
+// =====================
+store.get('/brands', async (c) => {
+  const storeId = getStoreId(c);
+  const brands = await c.env.DB.prepare('SELECT * FROM brands WHERE store_id = ? ORDER BY name').bind(storeId).all();
+  return c.json({ brands: (brands as any).results || brands });
+});
+
+store.post('/brands', zValidator('json', createBrandSchema), async (c) => {
+  const storeId = getStoreId(c);
+  const data = c.req.valid('json' as any) as any;
+  const slug = data.slug ? slugify(data.slug) : slugify(data.name);
+  const id = crypto.randomUUID();
+  await c.env.DB.prepare('INSERT INTO brands (id, store_id, name, slug, description) VALUES (?, ?, ?, ?, ?)').bind(id, storeId, data.name, slug, data.description || null).run();
+  const brand = await c.env.DB.prepare('SELECT * FROM brands WHERE id = ?').bind(id).first();
+  return c.json({ brand, message: 'Marca criada!' }, 201);
+});
+
+store.put('/brands/:id', zValidator('json', createBrandSchema.partial()), async (c) => {
+  const storeId = getStoreId(c);
+  const id = c.req.param('id');
+  const data = c.req.valid('json' as any) as any;
+  const updates: string[] = [];
+  const params: any[] = [];
+  if (data.name) { updates.push('name = ?'); params.push(data.name); updates.push('slug = ?'); params.push(slugify(data.slug || data.name)); }
+  if (data.description !== undefined) { updates.push('description = ?'); params.push(data.description); }
+  if (updates.length === 0) return c.json({ error: 'Nenhum campo' }, 400);
+  updates.push("updated_at = datetime('now')");
+  params.push(id, storeId);
+  await c.env.DB.prepare(`UPDATE brands SET ${updates.join(', ')} WHERE id = ? AND store_id = ?`).bind(...params).run();
+  const brand = await c.env.DB.prepare('SELECT * FROM brands WHERE id = ?').bind(id).first();
+  return c.json({ brand, message: 'Marca atualizada!' });
+});
+
+store.delete('/brands/:id', async (c) => {
+  const storeId = getStoreId(c);
+  const id = c.req.param('id');
+  await c.env.DB.prepare('DELETE FROM brands WHERE id = ? AND store_id = ?').bind(id, storeId).run();
+  return c.json({ message: 'Marca removida' });
+});
+
+// =====================
+// BANNERS
+// =====================
+store.get('/banners', async (c) => {
+  const storeId = getStoreId(c);
+  const banners = await c.env.DB.prepare('SELECT * FROM banners WHERE store_id = ? ORDER BY sort_order, created_at DESC').bind(storeId).all();
+  return c.json({ banners: (banners as any).results || banners });
+});
+
+store.post('/banners', zValidator('json', createBannerSchema), async (c) => {
+  const storeId = getStoreId(c);
+  const data = c.req.valid('json' as any) as any;
+  const id = crypto.randomUUID();
+  await c.env.DB.prepare('INSERT INTO banners (id, store_id, title, subtitle, image_url, link_url, button_text, position, is_active, sort_order) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').bind(id, storeId, data.title || null, data.subtitle || null, data.image_url, data.link_url || null, data.button_text || null, data.position || 'hero', data.is_active ? 1 : 0, data.sort_order || 0).run();
+  const banner = await c.env.DB.prepare('SELECT * FROM banners WHERE id = ?').bind(id).first();
+  return c.json({ banner, message: 'Banner criado!' }, 201);
+});
+
+store.put('/banners/:id', zValidator('json', createBannerSchema.partial()), async (c) => {
+  const storeId = getStoreId(c);
+  const id = c.req.param('id');
+  const data = c.req.valid('json' as any) as any;
+  const updates: string[] = [];
+  const params: any[] = [];
+  const fields = ['title','subtitle','image_url','link_url','button_text','position','sort_order'];
+  for (const f of fields) if (data[f] !== undefined) { updates.push(`${f} = ?`); params.push(data[f]); }
+  if (data.is_active !== undefined) { updates.push('is_active = ?'); params.push(data.is_active ? 1 : 0); }
+  if (updates.length === 0) return c.json({ error: 'Nenhum campo' }, 400);
+  updates.push("updated_at = datetime('now')");
+  params.push(id, storeId);
+  await c.env.DB.prepare(`UPDATE banners SET ${updates.join(', ')} WHERE id = ? AND store_id = ?`).bind(...params).run();
+  const banner = await c.env.DB.prepare('SELECT * FROM banners WHERE id = ?').bind(id).first();
+  return c.json({ banner, message: 'Banner atualizado!' });
+});
+
+store.delete('/banners/:id', async (c) => {
+  const storeId = getStoreId(c);
+  const id = c.req.param('id');
+  await c.env.DB.prepare('DELETE FROM banners WHERE id = ? AND store_id = ?').bind(id, storeId).run();
+  return c.json({ message: 'Banner removido' });
+});
+
+// =====================
+// STORE SETTINGS
+// =====================
+store.get('/settings', async (c) => {
+  const storeId = getStoreId(c);
+  const storeData = await c.env.DB.prepare('SELECT * FROM stores WHERE id = ?').bind(storeId).first();
+  if (!storeData) return c.json({ error: 'Loja não encontrada' }, 404);
+  return c.json({ store: storeData });
+});
+
+store.put('/settings', async (c) => {
+  const storeId = getStoreId(c);
+  const data = await c.req.json() as any;
+  const user = c.get('user');
+
+  const allowed = ['name','description','logo_url','banner_url','primary_color','secondary_color','accent_color','address','city','state','zip_code','phone','whatsapp','email','instagram','facebook','website','opening_hours','seo_title','seo_description','seo_keywords'];
+  const updates: string[] = [];
+  const params: any[] = [];
+  for (const key of allowed) {
+    if (data[key] !== undefined) {
+      updates.push(`${key} = ?`);
+      params.push(data[key]);
+    }
+  }
+  if (data.slug) {
+    updates.push('slug = ?');
+    params.push(slugify(data.slug));
+  }
+  if (updates.length === 0) return c.json({ error: 'Nenhum campo para atualizar' }, 400);
+  updates.push("updated_at = datetime('now')");
+  params.push(storeId);
+
+  await c.env.DB.prepare(`UPDATE stores SET ${updates.join(', ')} WHERE id = ?`).bind(...params).run();
+
+  await c.env.DB.prepare(
+    'INSERT INTO audit_logs (user_id, store_id, action, entity_type, entity_id, details) VALUES (?, ?, ?, ?, ?, ?)'
+  ).bind(user.userId, storeId, 'update_store_settings', 'store', storeId, JSON.stringify(data)).run().catch(()=>{});
+
+  const storeData = await c.env.DB.prepare('SELECT * FROM stores WHERE id = ?').bind(storeId).first();
+  return c.json({ store: storeData, message: 'Configurações salvas com sucesso!' });
+});
+
+// =====================
+// AI GENERATION
+// =====================
+store.post('/ai/generate', async (c) => {
+  const storeId = getStoreId(c);
+  const user = c.get('user');
+  const body = await c.req.json() as any;
+  const { image_url, style = 'modern_room', product_id, generate_description = true, generate_image = true } = body;
+
+  if (!image_url) return c.json({ error: 'Imagem obrigatória' }, 400);
+
+  // Verifica limites
+  const storeData = await c.env.DB.prepare('SELECT ai_enabled, ai_daily_limit, ai_monthly_limit FROM stores WHERE id = ?').bind(storeId).first() as any;
+  if (!storeData?.ai_enabled) return c.json({ error: 'IA desabilitada para esta loja. Contate o Super Admin.' }, 403);
+
+  const todayStart = new Date().toISOString().split('T')[0];
+  const todayCount = await c.env.DB.prepare("SELECT COUNT(*) as count FROM ai_generations WHERE store_id = ? AND date(created_at) = date('now')").bind(storeId).first() as any;
+  if ((todayCount?.count || 0) >= (storeData.ai_daily_limit || 10)) {
+    return c.json({ error: `Limite diário de ${storeData.ai_daily_limit} gerações atingido.` }, 429);
+  }
+
+  // Verifica se IA está configurada
+  const apiKey = c.env.OPENAI_API_KEY;
+  if (!apiKey) {
+    return c.json({ 
+      error: 'IA não configurada',
+      message: 'A funcionalidade de IA está indisponível. O Super Administrador precisa configurar a chave da OpenAI nas variáveis de ambiente (OPENAI_API_KEY).',
+      configured: false
+    }, 503);
+  }
+
+  const generationId = crypto.randomUUID();
+  await c.env.DB.prepare(
+    'INSERT INTO ai_generations (id, store_id, user_id, product_id, type, status, input_image_url, input_prompt, ai_model, ai_style) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+  ).bind(generationId, storeId, user.userId, product_id || null, 'full_ad', 'processing', image_url, `style:${style}`, c.env.AI_PROVIDER || 'openai/gpt-4o', style).run();
+
+  try {
+    const config = {
+      enabled: true,
+      provider: 'openai',
+      apiKey,
+      model: 'gpt-4o',
+      imageModel: 'dall-e-3'
+    };
+
+    let result: any = {};
+
+    if (generate_description) {
+      const storeCtx = await c.env.DB.prepare('SELECT name, description FROM stores WHERE id = ?').bind(storeId).first() as any;
+      const descResult = await generateProductDescription(config as any, image_url, storeCtx?.name);
+      result = { ...result, ...descResult };
+    }
+
+    if (generate_image) {
+      try {
+        const imgResult = await generateProductImage(config as any, image_url, style, result.name);
+        result.imageUrl = imgResult.imageUrl;
+        result.imageModel = imgResult.model;
+        result.cost = (result.cost || 0) + imgResult.cost;
+      } catch (imgErr: any) {
+        console.error('Erro imagem IA:', imgErr);
+        // Continua mesmo se imagem falhar
+        result.imageError = imgErr.message;
+      }
+    }
+
+    // Se gerando imagem, salva como product_image ilustrativa (requer aprovação)
+    let generatedImageUrl = result.imageUrl || null;
+    
+    // Atualiza registro de geração
+    await c.env.DB.prepare(`
+      UPDATE ai_generations SET status = 'completed', generated_name = ?, generated_description = ?, generated_category = ?, generated_image_url = ?, cost_usd = ?, completed_at = datetime('now') WHERE id = ?
+    `).bind(result.name || null, result.description || null, result.category || null, generatedImageUrl, result.cost || 0, generationId).run();
+
+    return c.json({
+      generation: {
+        id: generationId,
+        name: result.name,
+        shortDescription: result.shortDescription,
+        description: result.description,
+        category: result.category,
+        characteristics: result.characteristics,
+        imageUrl: generatedImageUrl,
+        cost: result.cost,
+        model: result.model,
+        style,
+        imageError: result.imageError
+      },
+      message: 'Geração concluída! Revise e aprove as informações antes de publicar.'
+    });
+
+  } catch (error: any) {
+    await c.env.DB.prepare("UPDATE ai_generations SET status = 'failed', error_message = ? WHERE id = ?").bind(error.message, generationId).run();
+    return c.json({ error: 'Erro ao gerar com IA', details: error.message }, 500);
+  }
+});
+
+store.get('/ai/history', async (c) => {
+  const storeId = getStoreId(c);
+  const history = await c.env.DB.prepare('SELECT * FROM ai_generations WHERE store_id = ? ORDER BY created_at DESC LIMIT 20').bind(storeId).all();
+  const totalCost = await c.env.DB.prepare('SELECT COALESCE(SUM(cost_usd), 0) as total FROM ai_generations WHERE store_id = ?').bind(storeId).first() as any;
+  const todayCount = await c.env.DB.prepare("SELECT COUNT(*) as count FROM ai_generations WHERE store_id = ? AND date(created_at) = date('now')").bind(storeId).first() as any;
+  
+  return c.json({ 
+    history: (history as any).results || history,
+    totalCost: totalCost?.total || 0,
+    todayCount: todayCount?.count || 0
+  });
+});
+
+// POST /api/store/ai/approve-image - aprovar imagem gerada
+store.post('/ai/approve-image', async (c) => {
+  const storeId = getStoreId(c);
+  const { product_id, image_url, generation_id } = await c.req.json() as any;
+
+  if (!product_id || !image_url) return c.json({ error: 'Produto e imagem obrigatórios' }, 400);
+
+  // Verifica ownership
+  const product = await c.env.DB.prepare('SELECT id FROM products WHERE id = ? AND store_id = ?').bind(product_id, storeId).first();
+  if (!product) return c.json({ error: 'Produto não encontrado' }, 404);
+
+  const imageId = crypto.randomUUID();
+  await c.env.DB.prepare(
+    'INSERT INTO product_images (id, product_id, store_id, url, is_ai_generated, ai_style, sort_order) VALUES (?, ?, ?, ?, ?, ?, ?)'
+  ).bind(imageId, product_id, storeId, image_url, 1, 'modern_room', 99).run();
+
+  return c.json({ message: 'Imagem aprovada e adicionada ao produto!', imageId });
+});
+
+// =====================
+// ANALYTICS
+// =====================
+store.get('/analytics', async (c) => {
+  const storeId = getStoreId(c);
+  const days = parseInt(c.req.query('days') || '30');
+  
+  const views = await c.env.DB.prepare(`
+    SELECT date(created_at) as date, COUNT(*) as count 
+    FROM analytics_events WHERE store_id = ? AND event_type = 'catalog_view' AND created_at >= datetime('now', '-${days} days')
+    GROUP BY date(created_at) ORDER BY date
+  `).bind(storeId).all();
+
+  const topProductsAnalytics = await c.env.DB.prepare(`
+    SELECT p.name, p.slug, COUNT(*) as views 
+    FROM analytics_events ae 
+    JOIN products p ON ae.product_id = p.id 
+    WHERE ae.store_id = ? AND ae.event_type = 'product_view' 
+    GROUP BY ae.product_id ORDER BY views DESC LIMIT 10
+  `).bind(storeId).all();
+
+  return c.json({
+    chart: (views as any).results || views,
+    topProducts: (topProductsAnalytics as any).results || topProductsAnalytics
+  });
+});
+
+// =====================
+// EXPORT/IMPORT CSV
+// =====================
+store.get('/export/csv', async (c) => {
+  const storeId = getStoreId(c);
+  const products = await c.env.DB.prepare('SELECT * FROM products WHERE store_id = ? ORDER BY created_at DESC').bind(storeId).all();
+  
+  const rows = (products as any).results || products;
+  const headers = ['sku','name','slug','price','original_price','promotional_price','status','is_featured','stock_quantity','short_description','description'];
+  let csv = headers.join(',') + '\n';
+  
+  for (const p of rows as any[]) {
+    const row = headers.map(h => {
+      const val = (p as any)[h] ?? '';
+      const escaped = String(val).replace(/"/g, '""');
+      return `"${escaped}"`;
+    }).join(',');
+    csv += row + '\n';
+  }
+
+  return new Response(csv, {
+    headers: {
+      'Content-Type': 'text/csv; charset=utf-8',
+      'Content-Disposition': `attachment; filename="produtos-${storeId}.csv"`
+    }
+  });
+});
+
+export default store;

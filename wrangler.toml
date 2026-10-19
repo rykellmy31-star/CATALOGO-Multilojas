@@ -1,0 +1,41 @@
+name = "catalogos-saas"
+main = "backend/src/index.ts"
+compatibility_date = "2024-10-19"
+compatibility_flags = ["nodejs_compat"]
+
+[vars]
+ENVIRONMENT = "production"
+PLATFORM_NAME = "Catálogos Pro"
+AI_PROVIDER = "openai"
+AI_ENABLED = "true"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "catalogos_db"
+database_id = "local-catalogos-db"
+
+[[r2_buckets]]
+binding = "STORAGE"
+bucket_name = "catalogos-storage"
+
+[[r2_buckets]]
+binding = "STORAGE_PUBLIC"
+bucket_name = "catalogos-public"
+
+[triggers]
+crons = ["0 * * * *"]
+
+[observability]
+enabled = true
+
+[assets]
+directory = "./frontend/dist"
+not_found_handling = "single-page-application"
+
+# Para desenvolvimento local
+[env.staging]
+name = "catalogos-saas-staging"
+
+[env.development]
+name = "catalogos-saas-dev"
+vars = { ENVIRONMENT = "development" }
