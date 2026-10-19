@@ -229,7 +229,7 @@ store.put('/products/:id', zValidator('json', createProductSchema.partial()), as
   for (const key of allowed as Extract<keyof typeof data, string>[]) {
     if (data[key] !== undefined) {
       updates.push(`${key} = ?`);
-      params.push(data[key]);
+      params.push(key === 'sku' && !data[key] ? null : data[key]);
     }
   }
   if (data.is_featured !== undefined) { updates.push('is_featured = ?'); params.push(data.is_featured ? 1 : 0); }

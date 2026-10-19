@@ -16,6 +16,7 @@ permissions:
   contents: read
 jobs:
   validar:
+    name: ${{ github.event_name == 'workflow_dispatch' && !inputs.navegador && 'validar-basico-manual' || 'validar' }}
     # Drafts run only after an explicit manual request; ready PRs always validate.
     if: >-
       github.event_name == 'workflow_dispatch' ||

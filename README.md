@@ -18,8 +18,7 @@ Node 22.13 ou superior.
 
 ```sh
 npm ci
-npm test
-npm run build
+npm run validate
 npm run db:migrate
 npx wrangler deploy --dry-run --outdir /tmp/catalogo-worker
 npm run dev
@@ -41,3 +40,5 @@ O Worker serve a SPA pelo binding `ASSETS`, encaminha `/api/*` à API e exporta 
 - Imagens de produtos publicadas podem ser consultadas sem autenticação; imagens de rascunhos no bucket privado não são servidas publicamente pela API. Não configurar um domínio público irrestrito para esse bucket.
 - Limites e cobrança de IA exigem validação separada de concorrência/custos antes de ativação comercial.
 - O CI valida login, cadastro de produto, prévia, R2 e catálogo móvel com Chromium e dados fictícios. Aprovação visual e de negócio em navegadores móveis e em homologação ainda é necessária antes de lançamento.
+
+Para desenvolver com economia de minutos e escolher a validação manual, consulte [VALIDACAO-ECONOMICA.md](docs/VALIDACAO-ECONOMICA.md). O relatório desta continuação está em [CONTINUIDADE-VALIDACAO-LOCAL.md](docs/CONTINUIDADE-VALIDACAO-LOCAL.md).

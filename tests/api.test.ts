@@ -55,6 +55,17 @@ describe('API real',()=>{
     for (const link_url of ['javascript:alert(1)', '//evil.test/path', '\\evil.test']) expect((await f.request('/api/store/banners','POST',{image_url:'https://example.com/banner.png',link_url})).status).toBe(400);
     expect((await f.request('/api/store/settings','PUT',{website:'javascript:alert(1)'})).status).toBe(400);
   });
+  it('SKU opcional vazio não impede edição de vários produtos',async()=>{
+    f=fixture();const result=await f.request('/api/store/products','POST',{name:'Produto dois',price:10});const {product}=await result.json();
+    expect((await f.request('/api/store/products/pa','PUT',{sku:''})).status).toBe(200);
+    expect((await f.request(`/api/store/products/${product.id}`,'PUT',{sku:''})).status).toBe(200);
+    expect(f.db.prepare("SELECT sku FROM products WHERE id='pa'").get()?.sku).toBe(null);
+  });
+  it('SKU repetido retorna conflito sem expor detalhes do banco',async()=>{
+    f=fixture();expect((await f.request('/api/store/products/pa','PUT',{sku:'COD-1'})).status).toBe(200);
+    const response=await f.request('/api/store/products','POST',{name:'Outro',price:20,sku:'COD-1'});
+    expect(response.status).toBe(409);expect(JSON.stringify(await response.json())).not.toContain('UNIQUE');
+  });
   it('bootstrap exige segredos válidos e índice único de superadmin',async()=>{
     f=fixture();expect((await f.request('/api/auth/setup-super-admin','POST',{setupToken:'x',name:'Nome',email:'new@test.com',password:'Password123'},null)).status).toBe(503);
     expect(()=>f.db.exec("INSERT INTO users(id,name,email,password_hash,role) VALUES ('r2','Root2','r2@test.com','x','super_admin')")).toThrow(/UNIQUE/);

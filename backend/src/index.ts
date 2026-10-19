@@ -52,6 +52,7 @@ app.get('*', c => {
 });
 app.notFound(c => c.json({ error: 'Rota não encontrada' }, 404));
 app.onError((err, c) => {
+  if (err.message.includes('UNIQUE constraint failed')) return c.json({ error: 'Já existe um registro com esses dados. Revise o código, endereço ou email informado.' }, 409);
   console.error('Unhandled error:', err);
   return c.json({ error: 'Erro interno do servidor' }, 500);
 });

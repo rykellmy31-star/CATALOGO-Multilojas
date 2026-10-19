@@ -6,6 +6,8 @@ O workflow não possui gatilho push. PRs em rascunho não alocam runner automati
 
 Validação manual: o workflow declara workflow_dispatch com navegador opcional. O GitHub só disponibiliza o botão Run workflow quando esse arquivo existe na branch padrão; atualmente ele ainda não existe na main, que não foi alterada. Enquanto o PR permanece em rascunho, adicionar explicitamente o rótulo validar-agora ao PR solicita a bateria completa. Para repetir essa solicitação, remover e adicionar novamente o rótulo. Esta execução não adiciona o rótulo nem dispara Actions manualmente.
 
+A execução manual sem navegador usa o check validar-basico-manual; ele não substitui o check completo validar para integração.
+
 Antes de integrar à main: tornar o PR pronto para revisão, aguardar o check validar aprovado no SHA atual e revisar o resultado. A obrigatoriedade técnica desse check depende da proteção da branch/regras do repositório. A conexão disponível não permite consultar ou alterar a proteção da main (403); nenhuma proteção é presumida ou alterada aqui.
 
 Não há deploy, uso de segredos reais ou autorização de cobrança neste workflow. Os controles reduzem execuções de Actions; eventual consumo dos minutos disponíveis continua sujeito à configuração da conta GitHub.
