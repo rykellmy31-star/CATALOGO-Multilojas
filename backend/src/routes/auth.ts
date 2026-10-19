@@ -56,9 +56,16 @@ auth.post('/setup-super-admin', zValidator('json', setupSuperAdminSchema), async
   const userId = crypto.randomUUID();
   const passwordHash = await hashPassword(password);
   // A unique DB constraint on the bootstrap role is also required to prevent concurrent setup.
-  await c.env.DB.prepare(
-    'INSERT INTO users (id, name, email, password_hash, role, store_id, is_active) VALUES (?, ?, ?, ?, ?, ?, ?)'
-  ).bind(userId, name, email, passwordHash, 'super_admin', null, 1).run();
+  try {
+    await c.env.DB.prepare(
+      'INSERT INTO users (id, name, email, password_hash, role, store_id, is_active) VALUES (?, ?, ?, ?, ?, ?, ?)'
+    ).bind(userId, name, email, passwordHash, 'super_admin', null, 1).run();
+  } catch (error) {
+    // The unique partial index prevents concurrent bootstrap requests from creating two admins.
+    const created = await c.env.DB.prepare("SELECT id FROM users WHERE role = 'super_admin' LIMIT 1").first();
+    if (created) return c.json({ error: 'Super Administrador já configurado.' }, 409);
+    throw error;
+  }
 
   await c.env.DB.prepare(
     'INSERT INTO audit_logs (user_id, action, entity_type, entity_id, details) VALUES (?, ?, ?, ?, ?)'
