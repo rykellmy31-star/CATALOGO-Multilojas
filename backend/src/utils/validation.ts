@@ -1,5 +1,12 @@
 import { z } from 'zod';
 
+export const publicLinkSchema = z.string().max(4096).refine(value => {
+  if (!value) return true;
+  if (value.includes('\\') || /[\u0000-\u0020]/.test(value)) return false;
+  if (value.startsWith('/') && !value.startsWith('//')) return true;
+  try { return ['https:', 'http:'].includes(new URL(value).protocol); } catch { return false; }
+}, 'Use uma URL http/https ou caminho local seguro');
+
 export const loginSchema = z.object({
   email: z.string().email('Email inválido'),
   password: z.string().min(6, 'Senha deve ter no mínimo 6 caracteres').max(72)
@@ -51,7 +58,7 @@ export const createProductSchema = z.object({
   dimensions: z.string().optional().nullable(),
   technical_specs: z.string().optional().nullable(),
   variations: z.string().optional().nullable(),
-  images: z.array(z.string().max(4096)).max(50).optional()
+  images: z.array(publicLinkSchema).max(50).optional()
 });
 
 export const createCategorySchema = z.object({
@@ -72,8 +79,8 @@ export const createBrandSchema = z.object({
 export const createBannerSchema = z.object({
   title: z.string().optional(),
   subtitle: z.string().optional(),
-  image_url: z.string().min(1, 'Imagem obrigatória'),
-  link_url: z.string().optional(),
+  image_url: publicLinkSchema.refine(value => value.length > 0, 'Imagem obrigatória'),
+  link_url: publicLinkSchema.optional(),
   button_text: z.string().optional(),
   position: z.enum(['hero', 'secondary', 'footer', 'popup']).default('hero'),
   is_active: z.coerce.boolean().optional().default(true),
@@ -82,7 +89,7 @@ export const createBannerSchema = z.object({
 
 export const aiGenerateSchema = z.object({
   product_id: z.string().optional(),
-  image_url: z.string().min(1, 'Imagem obrigatória'),
+  image_url: publicLinkSchema.refine(value => value.length > 0, 'Imagem obrigatória'),
   style: z.enum(['modern_room', 'white_background', 'promotional', 'premium_catalog']).default('modern_room'),
   generate_description: z.boolean().optional().default(true),
   generate_image: z.boolean().optional().default(true)

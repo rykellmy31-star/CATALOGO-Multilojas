@@ -16,14 +16,14 @@ Dependências de build, testes, roteamento e CSS atualizadas; dependências sem 
 
 ## Evidências
 
-- 18 testes de integração executando as rotas reais com SQLite e o formato de retorno D1.
+- 19 testes de integração executando as rotas reais com SQLite e o formato de retorno D1.
 - Compilação TypeScript de frontend/backend e build Vite aprovados.
 - Auditoria npm: zero vulnerabilidades após a atualização e limpeza do lockfile.
 - Cinco migrações aplicadas em D1 local; segunda execução sem migrações pendentes.
 - Empacotamento com Wrangler em `--dry-run`, sem publicação.
 - Worker local: health, setup do Super Administrador, criação de loja e criação de administrador retornaram sucesso com D1 local real.
 - O runner local restringiu a enumeração de interfaces de rede; somente para iniciar o teste foi necessário um shim temporário externo ao repositório para fornecer loopback. Nenhuma modificação de produto depende dele.
-- Revisão visual e automação Chromium não concluídas: o navegador não estava instalado e seu download retornou arquivo truncado. Nenhuma aprovação visual é presumida.
+- Automação Chromium concluída no GitHub Actions: login, criação de produto, prévia, upload R2 local, consulta pública da imagem, catálogo móvel sem rolagem horizontal e detalhe do produto, sem erros JavaScript. A instalação local do navegador falhou por download truncado; o runner do GitHub resolveu essa limitação. Capturas de desktop/mobile e log do Worker foram preservados no artefato de validação do CI. A aprovação visual final de negócio permanece em homologação.
 
 ## Antes do lançamento
 
@@ -36,3 +36,13 @@ Dependências de build, testes, roteamento e CSS atualizadas; dependências sem 
 A recuperação de acesso de lojistas é administrativa pelo Super Administrador; recuperação automática por email não integra este escopo implementado. Não há validação de pagamentos: o projeto importado é um catálogo com contato via WhatsApp, sem checkout financeiro integrado.
 
 Nenhuma alteração à main, publicação de produção, migração remota ou alteração de segredo remoto foi realizada.
+
+## Commits desta execução
+
+- `2d43113`: importação do projeto original.
+- `c969e19`: isolamento, sessões, D1, uploads e testes de integração.
+- `fec28f3`: assets Cloudflare, fluxos do painel e atualização das dependências.
+- `eaec8a7`: testes de navegador e R2 local no GitHub Actions.
+- Commit final: validação de URLs, acessibilidade dos campos e consolidação deste relatório.
+
+PR de revisão: https://github.com/rykellmy31-star/CATALOGO-Multilojas/pull/1 (rascunho; sem merge).

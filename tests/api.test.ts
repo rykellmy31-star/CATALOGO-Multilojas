@@ -50,6 +50,11 @@ describe('API real',()=>{
     expect((await f.request('/api/superadmin/stores/a/admins/ua/reset-password','PUT',{password:'NewPassword123'},f.token('root',null,'super_admin'))).status).toBe(200);
     expect((await f.request('/api/auth/me','GET',undefined,token)).status).toBe(401);
   });
+  it('rejeita URLs executáveis ou redirecionamentos de protocolo',async()=>{
+    f=fixture();
+    for (const link_url of ['javascript:alert(1)', '//evil.test/path', '\\evil.test']) expect((await f.request('/api/store/banners','POST',{image_url:'https://example.com/banner.png',link_url})).status).toBe(400);
+    expect((await f.request('/api/store/settings','PUT',{website:'javascript:alert(1)'})).status).toBe(400);
+  });
   it('bootstrap exige segredos válidos e índice único de superadmin',async()=>{
     f=fixture();expect((await f.request('/api/auth/setup-super-admin','POST',{setupToken:'x',name:'Nome',email:'new@test.com',password:'Password123'},null)).status).toBe(503);
     expect(()=>f.db.exec("INSERT INTO users(id,name,email,password_hash,role) VALUES ('r2','Root2','r2@test.com','x','super_admin')")).toThrow(/UNIQUE/);

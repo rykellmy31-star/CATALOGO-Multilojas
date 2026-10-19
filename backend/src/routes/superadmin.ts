@@ -2,7 +2,7 @@ import { Hono } from 'hono';
 import { authMiddleware, requireRole } from '../middleware/auth.js';
 import { tenantMiddleware } from '../middleware/tenant.js';
 import { zValidator } from '../middleware/validation.js';
-import { createStoreSchema, storeAdminSchema } from '../utils/validation.js';
+import { createStoreSchema, storeAdminSchema, publicLinkSchema } from '../utils/validation.js';
 import { hashPassword } from '../utils/hash.js';
 import { slugify } from '../utils/slug.js';
 
@@ -234,6 +234,7 @@ superadmin.put('/platform-config', async (c) => {
   const data = await c.req.json() as any;
   const user = c.get('user');
 
+  if (data.logo_url && !publicLinkSchema.safeParse(data.logo_url).success) return c.json({ error: 'URL do logo inválida' }, 400);
   const allowed = ['platform_name','logo_url','primary_color','secondary_color','accent_color','footer_text','support_email','ai_provider','ai_enabled','ai_daily_limit_default','ai_monthly_limit_default','storage_limit_per_store_mb'];
   const updates: string[] = [];
   const params: any[] = [];

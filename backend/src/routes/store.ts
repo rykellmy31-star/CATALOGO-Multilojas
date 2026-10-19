@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import { authMiddleware, requireRole } from '../middleware/auth.js';
 import { zValidator } from '../middleware/validation.js';
-import { createProductSchema, createCategorySchema, createBrandSchema, createBannerSchema } from '../utils/validation.js';
+import { createProductSchema, createCategorySchema, createBrandSchema, createBannerSchema, publicLinkSchema } from '../utils/validation.js';
 import { slugify } from '../utils/slug.js';
 import { generateProductImage, generateProductDescription, AI_STYLES } from '../services/ai.js';
 
@@ -476,6 +476,9 @@ store.put('/settings', async (c) => {
   const data = await c.req.json() as any;
   const user = c.get('user');
 
+  for (const field of ['logo_url', 'banner_url', 'website', 'facebook']) {
+    if (data[field] && !publicLinkSchema.safeParse(data[field]).success) return c.json({ error: `URL inválida: ${field}` }, 400);
+  }
   const allowed = ['name','description','logo_url','banner_url','primary_color','secondary_color','accent_color','address','city','state','zip_code','phone','whatsapp','email','instagram','facebook','website','opening_hours','seo_title','seo_description','seo_keywords'];
   const updates: string[] = [];
   const params: any[] = [];

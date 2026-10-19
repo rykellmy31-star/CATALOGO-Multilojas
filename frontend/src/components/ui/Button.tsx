@@ -45,10 +45,12 @@ export function Badge({ children, variant='default', className='' }: { children:
 
 export function Input(props: React.InputHTMLAttributes<HTMLInputElement> & { label?: string; error?: string; hint?: string }) {
   const { label, error, hint, className='', ...rest } = props;
+  const generatedId = React.useId();
+  const id = props.id || generatedId;
   return (
     <div className="space-y-1.5">
-      {label && <label className="block text-sm font-medium text-gray-700">{label}</label>}
-      <input className={`w-full px-4 py-2.5 rounded-xl border ${error ? 'border-red-300 focus:ring-red-500 focus:border-red-500' : 'border-gray-200 focus:ring-sky-500 focus:border-sky-500'} bg-white text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-opacity-50 transition-colors ${className}`} {...rest} />
+      {label && <label htmlFor={id} className="block text-sm font-medium text-gray-700">{label}</label>}
+      <input id={id} aria-invalid={!!error} className={`w-full px-4 py-2.5 rounded-xl border ${error ? 'border-red-300 focus:ring-red-500 focus:border-red-500' : 'border-gray-200 focus:ring-sky-500 focus:border-sky-500'} bg-white text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-opacity-50 transition-colors ${className}`} {...rest} />
       {error && <p className="text-xs text-red-600">{error}</p>}
       {hint && !error && <p className="text-xs text-gray-500">{hint}</p>}
     </div>
@@ -57,20 +59,24 @@ export function Input(props: React.InputHTMLAttributes<HTMLInputElement> & { lab
 
 export function Textarea(props: React.TextareaHTMLAttributes<HTMLTextAreaElement> & { label?: string; error?: string }) {
   const { label, error, className='', ...rest } = props;
+  const generatedId = React.useId();
+  const id = props.id || generatedId;
   return (
     <div className="space-y-1.5">
-      {label && <label className="block text-sm font-medium text-gray-700">{label}</label>}
-      <textarea className={`w-full px-4 py-2.5 rounded-xl border ${error ? 'border-red-300' : 'border-gray-200'} bg-white focus:outline-none focus:ring-2 focus:ring-sky-500 focus:border-sky-500 transition-colors ${className}`} {...rest} />
+      {label && <label htmlFor={id} className="block text-sm font-medium text-gray-700">{label}</label>}
+      <textarea id={id} aria-invalid={!!error} className={`w-full px-4 py-2.5 rounded-xl border ${error ? 'border-red-300' : 'border-gray-200'} bg-white focus:outline-none focus:ring-2 focus:ring-sky-500 focus:border-sky-500 transition-colors ${className}`} {...rest} />
       {error && <p className="text-xs text-red-600">{error}</p>}
     </div>
   );
 }
 
 export function Select({ label, children, error, className='', ...props }: React.SelectHTMLAttributes<HTMLSelectElement> & { label?: string; error?: string }) {
+  const generatedId = React.useId();
+  const id = props.id || generatedId;
   return (
     <div className="space-y-1.5">
-      {label && <label className="block text-sm font-medium text-gray-700">{label}</label>}
-      <select className={`w-full px-4 py-2.5 rounded-xl border border-gray-200 bg-white focus:outline-none focus:ring-2 focus:ring-sky-500 focus:border-sky-500 ${className}`} {...props}>{children}</select>
+      {label && <label htmlFor={id} className="block text-sm font-medium text-gray-700">{label}</label>}
+      <select id={id} aria-invalid={!!error} className={`w-full px-4 py-2.5 rounded-xl border border-gray-200 bg-white focus:outline-none focus:ring-2 focus:ring-sky-500 focus:border-sky-500 ${className}`} {...props}>{children}</select>
       {error && <p className="text-xs text-red-600">{error}</p>}
     </div>
   );

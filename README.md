@@ -40,4 +40,4 @@ O Worker serve a SPA pelo binding `ASSETS`, encaminha `/api/*` à API e exporta 
 - Uploads e integrações externas precisam de homologação com recursos reais autorizados.
 - Imagens de produtos publicadas podem ser consultadas sem autenticação; imagens de rascunhos no bucket privado não são servidas publicamente pela API. Não configurar um domínio público irrestrito para esse bucket.
 - Limites e cobrança de IA exigem validação separada de concorrência/custos antes de ativação comercial.
-- Aprovação visual e de negócio em navegadores móveis e em homologação ainda é necessária antes de lançamento.
+- O CI valida login, cadastro de produto, prévia, R2 e catálogo móvel com Chromium e dados fictícios. Aprovação visual e de negócio em navegadores móveis e em homologação ainda é necessária antes de lançamento.
