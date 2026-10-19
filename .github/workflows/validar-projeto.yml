@@ -1,0 +1,23 @@
+name: Validar projeto
+on:
+  push:
+    branches: [main, 'desenvolvimento/**']
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  validar:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verificar presença do projeto
+        run: |
+          test -f package.json || { echo "::error::O código do projeto ainda não foi importado."; exit 1; }
+          test -f package-lock.json || { echo "::error::package-lock.json ausente."; exit 1; }
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - run: npm test --if-present
+      - run: npm run build --if-present
