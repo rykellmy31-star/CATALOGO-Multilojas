@@ -22,9 +22,10 @@ export async function authMiddleware(c: Context<Env>, next: Next) {
   const payload = verifyToken(token, c.env.JWT_SECRET);
   if (!payload) return c.json({ error: 'Token inválido ou expirado.' }, 401);
   const user = await c.env.DB.prepare(
-    'SELECT id, email, is_active, role, store_id FROM users WHERE id = ?'
+    'SELECT id, email, is_active, role, store_id, auth_version FROM users WHERE id = ?'
   ).bind(payload.userId).first() as any;
   if (!user || !user.is_active) return c.json({ error: 'Acesso não autorizado.' }, 401);
+  if ((payload.version || 0) !== (user.auth_version || 0)) return c.json({ error: 'Sessão encerrada.' }, 401);
   if (user.email !== payload.email || user.role !== payload.role || user.store_id !== payload.storeId)
     return c.json({ error: 'Sessão desatualizada.' }, 401);
   if (user.role === 'store_admin') {

@@ -2,7 +2,7 @@
   "name": "catalogos-saas",
   "private": true,
   "version": "1.0.0",
-  "description": "Plataforma SaaS Profissional de Catálogos Digitais Multilojas com IA",
+  "description": "Plataforma SaaS Profissional de Cat\u00e1logos Digitais Multilojas com IA",
   "type": "module",
   "workspaces": [
     "frontend",
@@ -14,7 +14,7 @@
     "dev:backend": "npm run dev -w backend",
     "build": "npm run build -w frontend && npm run build -w backend",
     "deploy": "npm run deploy --prefix backend",
-    "db:migrate": "wrangler d1 execute catalogos_db --file=./database/schema.sql --local",
+    "db:migrate": "wrangler d1 migrations apply catalogos_db --local",
     "db:seed": "wrangler d1 execute catalogos_db --file=./database/seed.sql --local",
     "test": "vitest run",
     "lint": "eslint . --ext .ts,.tsx"
@@ -25,6 +25,6 @@
     "wrangler": "^3.80.0"
   },
   "engines": {
-    "node": ">=18.0.0"
+    "node": ">=22.13.0"
   }
 }

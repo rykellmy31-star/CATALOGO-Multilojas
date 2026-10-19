@@ -12,7 +12,7 @@ type Env = {
 
 const upload = new Hono<Env>();
 
-upload.use('*', authMiddleware as any);
+upload.use('/', authMiddleware as any);
 
 // POST /api/upload - upload de imagem
 upload.post('/', async (c) => {
@@ -21,7 +21,7 @@ upload.post('/', async (c) => {
   const file = formData.get('file') as File | null;
   const productId = formData.get('productId') as string | null;
 
-  if (!file) return c.json({ error: 'Nenhum arquivo enviado' }, 400);
+  if (!file || typeof file === 'string') return c.json({ error: 'Nenhum arquivo enviado' }, 400);
 
   const allowed = ['image/jpeg', 'image/png', 'image/webp', 'image/jpg', 'image/gif'];
   if (!allowed.includes(file.type)) {
@@ -37,16 +37,17 @@ upload.post('/', async (c) => {
     return c.json({ error: 'Loja não identificada' }, 400);
   }
 
-  // Para super_admin, tenta pegar store do product
-  let effectiveStoreId = storeId;
-  if (!effectiveStoreId && productId) {
-    const product = await c.env.DB.prepare('SELECT store_id FROM products WHERE id = ?').bind(productId).first() as any;
-    effectiveStoreId = product?.store_id || 'platform';
+  let effectiveStoreId = storeId || 'platform';
+  if (productId) {
+    const product = user.role === 'super_admin'
+      ? await c.env.DB.prepare('SELECT store_id FROM products WHERE id = ?').bind(productId).first() as any
+      : await c.env.DB.prepare('SELECT store_id FROM products WHERE id = ? AND store_id = ?').bind(productId, storeId).first() as any;
+    if (!product) return c.json({ error: 'Produto não encontrado' }, 404);
+    effectiveStoreId = product.store_id;
   }
-  if (!effectiveStoreId) effectiveStoreId = 'platform';
 
   const arrayBuffer = await file.arrayBuffer();
-  const ext = file.name.split('.').pop()?.toLowerCase() || 'jpg';
+  const ext = ({ 'image/jpeg': 'jpg', 'image/jpg': 'jpg', 'image/png': 'png', 'image/webp': 'webp', 'image/gif': 'gif' } as Record<string, string>)[file.type];
   const timestamp = Date.now();
   const random = Math.random().toString(36).substring(2, 8);
   const key = `stores/${effectiveStoreId}/products/${productId || 'general'}/${timestamp}-${random}.${ext}`;
@@ -59,18 +60,8 @@ upload.post('/', async (c) => {
       }
     });
   } catch (e: any) {
-    // Fallback para ambiente sem R2 (dev local): retorna data URL
-    console.warn('R2 não disponível, usando fallback:', e.message);
-    const bytes = new Uint8Array(arrayBuffer);
-    let binary = '';
-    bytes.forEach(b => binary += String.fromCharCode(b));
-    const base64 = btoa(binary);
-    const dataUrl = `data:${file.type};base64,${base64}`;
-    return c.json({ 
-      url: dataUrl,
-      key: `local/${timestamp}-${random}.${ext}`,
-      message: 'Upload local (R2 não configurado)'
-    });
+    console.error('Upload indisponível');
+    return c.json({ error: 'Armazenamento indisponível. Tente novamente.' }, 503);
   }
 
   // URL pública
@@ -93,15 +84,19 @@ upload.post('/', async (c) => {
 // GET /api/storage/:key - servir arquivos do R2
 upload.get('/storage/:key{.*}', async (c) => {
   const key = c.req.param('key');
+  if (!key.startsWith('stores/') || key.includes('..')) return c.json({ error: 'Arquivo não encontrado' }, 404);
+  const image = await c.env.DB.prepare("SELECT pi.id FROM product_images pi JOIN products p ON pi.product_id = p.id AND pi.store_id = p.store_id JOIN stores s ON p.store_id = s.id WHERE pi.url = ? AND p.status = 'published' AND s.status = 'active'").bind(`/api/storage/${encodeURIComponent(key)}`).first();
+  if (!image) return c.json({ error: 'Arquivo não encontrado' }, 404);
   try {
-    const obj = await c.env.STORAGE.get(decodeURIComponent(key));
+    const obj = await c.env.STORAGE.get(key);
     if (!obj) return c.json({ error: 'Arquivo não encontrado' }, 404);
 
     return new Response(obj.body, {
       headers: {
         'Content-Type': obj.httpMetadata?.contentType || 'image/jpeg',
         'Cache-Control': 'public, max-age=31536000',
-        'ETag': obj.etag
+        'ETag': obj.etag,
+        'X-Content-Type-Options': 'nosniff'
       }
     });
   } catch (e: any) {

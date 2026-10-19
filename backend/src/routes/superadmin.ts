@@ -20,14 +20,14 @@ superadmin.use('*', requireRole('super_admin') as any);
 superadmin.get('/dashboard', async (c) => {
   const db = c.env.DB;
 
-  const [totalStores] = await db.prepare('SELECT COUNT(*) as count FROM stores WHERE status != "deleted"').all() as any;
-  const [activeStores] = await db.prepare('SELECT COUNT(*) as count FROM stores WHERE status = "active"').all() as any;
-  const [suspendedStores] = await db.prepare('SELECT COUNT(*) as count FROM stores WHERE status = "suspended"').all() as any;
-  const [totalProducts] = await db.prepare('SELECT COUNT(*) as count FROM products').all() as any;
-  const [totalImages] = await db.prepare('SELECT COUNT(*) as count FROM product_images').all() as any;
-  const [totalVisits] = await db.prepare("SELECT COUNT(*) as count FROM analytics_events WHERE event_type = 'catalog_view'").all() as any;
-  const [totalAIGenerations] = await db.prepare('SELECT COUNT(*) as count FROM ai_generations').all() as any;
-  const [totalAICost] = await db.prepare('SELECT COALESCE(SUM(cost_usd), 0) as total FROM ai_generations').all() as any;
+  const totalStores = await db.prepare(`SELECT COUNT(*) as count FROM stores WHERE status != 'deleted'`).first() as any;
+  const activeStores = await db.prepare(`SELECT COUNT(*) as count FROM stores WHERE status = 'active'`).first() as any;
+  const suspendedStores = await db.prepare(`SELECT COUNT(*) as count FROM stores WHERE status = 'suspended'`).first() as any;
+  const totalProducts = await db.prepare('SELECT COUNT(*) as count FROM products').first() as any;
+  const totalImages = await db.prepare('SELECT COUNT(*) as count FROM product_images').first() as any;
+  const totalVisits = await db.prepare("SELECT COUNT(*) as count FROM analytics_events WHERE event_type = 'catalog_view'").first() as any;
+  const totalAIGenerations = await db.prepare('SELECT COUNT(*) as count FROM ai_generations').first() as any;
+  const totalAICost = await db.prepare('SELECT COALESCE(SUM(cost_usd), 0) as total FROM ai_generations').first() as any;
 
   const recentStores = await db.prepare('SELECT id, name, slug, status, created_at FROM stores ORDER BY created_at DESC LIMIT 5').all();
   const recentActivity = await db.prepare('SELECT a.*, u.name as user_name FROM audit_logs a LEFT JOIN users u ON a.user_id = u.id ORDER BY a.created_at DESC LIMIT 10').all();
@@ -78,7 +78,7 @@ superadmin.get('/stores', async (c) => {
 
 // POST /api/superadmin/stores
 superadmin.post('/stores', zValidator('json', createStoreSchema), async (c) => {
-  const data = c.req.valid('json' as any) as any;
+  const data = c.req.valid('json') as any;
   const user = c.get('user');
 
   let slug = data.slug ? slugify(data.slug) : slugify(data.name);
@@ -124,7 +124,7 @@ superadmin.get('/stores/:id', async (c) => {
 // PUT /api/superadmin/stores/:id
 superadmin.put('/stores/:id', zValidator('json', createStoreSchema.partial()), async (c) => {
   const id = c.req.param('id');
-  const data = c.req.valid('json' as any) as any;
+  const data = c.req.valid('json') as any;
   const user = c.get('user');
 
   const store = await c.env.DB.prepare('SELECT * FROM stores WHERE id = ?').bind(id).first() as any;
@@ -209,8 +209,11 @@ superadmin.put('/stores/:id/admins/:adminId/reset-password', async (c) => {
   const { password } = await c.req.json() as any;
   if (!password || password.length < 6) return c.json({ error: 'Senha inválida' }, 400);
 
+  const storeId = c.req.param('id');
+  const admin = await c.env.DB.prepare("SELECT id FROM users WHERE id = ? AND store_id = ? AND role = 'store_admin'").bind(adminId, storeId).first();
+  if (!admin) return c.json({ error: 'Administrador não encontrado' }, 404);
   const hash = await hashPassword(password);
-  await c.env.DB.prepare('UPDATE users SET password_hash = ?, updated_at = datetime("now") WHERE id = ?').bind(hash, adminId).run();
+  await c.env.DB.prepare(`UPDATE users SET password_hash = ?, auth_version = auth_version + 1, updated_at = datetime('now') WHERE id = ? AND store_id = ?`).bind(hash, adminId, storeId).run();
   
   const user = c.get('user');
   await c.env.DB.prepare(
@@ -254,8 +257,8 @@ superadmin.put('/platform-config', async (c) => {
 
 // GET /api/superadmin/audit-logs
 superadmin.get('/audit-logs', async (c) => {
-  const page = parseInt(c.req.query('page') || '1');
-  const limit = Math.min(parseInt(c.req.query('limit') || '20'), 100);
+  const page = Math.max(1, Number.parseInt(c.req.query('page') || '1') || 1);
+  const limit = Math.min(100, Math.max(1, Number.parseInt(c.req.query('limit') || '20') || 20));
   const offset = (page - 1) * limit;
 
   const logs = await c.env.DB.prepare(`

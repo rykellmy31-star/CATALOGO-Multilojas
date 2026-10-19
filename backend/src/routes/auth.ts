@@ -1,3 +1,4 @@
+import { authRateLimit } from '../middleware/authRateLimit.js';
 import { Hono } from 'hono';
 import { zValidator } from '../middleware/validation.js';
 import { loginSchema, setupSuperAdminSchema } from '../utils/validation.js';
@@ -12,12 +13,12 @@ function configuredSecret(value: string | undefined): value is string {
   return typeof value === 'string' && value.length >= 32;
 }
 
-auth.post('/login', zValidator('json', loginSchema), async (c) => {
-  const { email, password } = c.req.valid('json' as any) as { email: string; password: string };
+auth.post('/login', authRateLimit, zValidator('json', loginSchema), async (c) => {
+  const { email, password } = c.req.valid('json') as { email: string; password: string };
   if (!configuredSecret(c.env.JWT_SECRET)) return c.json({ error: 'Autenticação indisponível.' }, 503);
 
   const user = await c.env.DB.prepare(
-    'SELECT id, name, email, password_hash, role, store_id, is_active FROM users WHERE email = ?'
+    'SELECT id, name, email, password_hash, role, store_id, is_active, auth_version FROM users WHERE email = ?'
   ).bind(email).first() as any;
   if (!user || !user.is_active || !(await verifyPassword(password, user.password_hash))) {
     return c.json({ error: 'Email ou senha inválidos.' }, 401);
@@ -29,17 +30,17 @@ auth.post('/login', zValidator('json', loginSchema), async (c) => {
     if (!store || store.status !== 'active') return c.json({ error: 'Acesso à loja indisponível.' }, 403);
   }
   const token = signToken({
-    userId: user.id, email: user.email, role: user.role, storeId: user.store_id
+    userId: user.id, email: user.email, role: user.role, storeId: user.store_id, version: user.auth_version || 0
   }, c.env.JWT_SECRET, '7d');
-  await c.env.DB.prepare('UPDATE users SET last_login_at = datetime("now") WHERE id = ?').bind(user.id).run();
+  await c.env.DB.prepare(`UPDATE users SET last_login_at = datetime('now') WHERE id = ?`).bind(user.id).run();
   await c.env.DB.prepare(
     'INSERT INTO audit_logs (user_id, store_id, action, entity_type, details) VALUES (?, ?, ?, ?, ?)'
   ).bind(user.id, user.store_id || null, 'login', 'user', JSON.stringify({ email })).run().catch(() => {});
   return c.json({ token, user: { id: user.id, name: user.name, email: user.email, role: user.role, storeId: user.store_id } });
 });
 
-auth.post('/setup-super-admin', zValidator('json', setupSuperAdminSchema), async (c) => {
-  const { setupToken, name, email, password } = c.req.valid('json' as any) as {
+auth.post('/setup-super-admin', authRateLimit, zValidator('json', setupSuperAdminSchema), async (c) => {
+  const { setupToken, name, email, password } = c.req.valid('json') as {
     setupToken: string; name: string; email: string; password: string
   };
   // Validate both secrets BEFORE creating any database records.
@@ -97,6 +98,7 @@ auth.get('/me', authMiddleware as any, async (c) => {
 
 auth.post('/logout', authMiddleware as any, async (c) => {
   const user = (c as any).get('user');
+  await c.env.DB.prepare('UPDATE users SET auth_version = auth_version + 1 WHERE id = ?').bind(user.userId).run();
   await c.env.DB.prepare(
     'INSERT INTO audit_logs (user_id, store_id, action, entity_type, details) VALUES (?, ?, ?, ?, ?)'
   ).bind(user.userId, user.storeId || null, 'logout', 'user', '{}').run().catch(() => {});

@@ -15,7 +15,7 @@ publicRoutes.get('/stores/:slug', async (c) => {
   const slug = c.req.param('slug');
   
   const store = await c.env.DB.prepare(
-    'SELECT id, name, slug, description, logo_url, banner_url, primary_color, secondary_color, accent_color, address, city, state, phone, whatsapp, email, instagram, facebook, website, opening_hours, seo_title, seo_description FROM stores WHERE slug = ? AND status = "active"'
+    `SELECT id, name, slug, description, logo_url, banner_url, primary_color, secondary_color, accent_color, address, city, state, phone, whatsapp, email, instagram, facebook, website, opening_hours, seo_title, seo_description FROM stores WHERE slug = ? AND status = 'active'`
   ).bind(slug).first() as any;
 
   if (!store) return c.json({ error: 'Loja não encontrada' }, 404);
@@ -28,7 +28,7 @@ publicRoutes.get('/stores/:slug', async (c) => {
 
   // Produtos em destaque
   const featured = await c.env.DB.prepare(`
-    SELECT p.*, pi.url as primary_image, c.name as category_name
+    SELECT p.id, p.store_id, p.sku, p.name, p.slug, p.short_description, p.description, p.price, p.original_price, p.promotional_price, p.category_id, p.brand_id, p.status, p.is_featured, p.is_on_sale, p.stock_quantity, p.dimensions, p.technical_specs, p.variations, pi.url as primary_image, c.name as category_name
     FROM products p
     LEFT JOIN product_images pi ON pi.product_id = p.id AND pi.is_primary = 1
     LEFT JOIN categories c ON p.category_id = c.id
@@ -38,7 +38,7 @@ publicRoutes.get('/stores/:slug', async (c) => {
 
   // Produtos em promoção
   const onSale = await c.env.DB.prepare(`
-    SELECT p.*, pi.url as primary_image, c.name as category_name
+    SELECT p.id, p.store_id, p.sku, p.name, p.slug, p.short_description, p.description, p.price, p.original_price, p.promotional_price, p.category_id, p.brand_id, p.status, p.is_featured, p.is_on_sale, p.stock_quantity, p.dimensions, p.technical_specs, p.variations, pi.url as primary_image, c.name as category_name
     FROM products p
     LEFT JOIN product_images pi ON pi.product_id = p.id AND pi.is_primary = 1
     LEFT JOIN categories c ON p.category_id = c.id
@@ -69,15 +69,15 @@ publicRoutes.get('/stores/:slug/products', async (c) => {
   const minPrice = c.req.query('minPrice');
   const maxPrice = c.req.query('maxPrice');
   const sort = c.req.query('sort') || 'newest'; // newest, price_asc, price_desc, name
-  const page = parseInt(c.req.query('page') || '1');
-  const limit = Math.min(parseInt(c.req.query('limit') || '12'), 50);
+  const page = Math.max(1, Number.parseInt(c.req.query('page') || '1') || 1);
+  const limit = Math.min(50, Math.max(1, Number.parseInt(c.req.query('limit') || '12') || 12));
   const offset = (page - 1) * limit;
 
-  const store = await c.env.DB.prepare('SELECT id FROM stores WHERE slug = ? AND status = "active"').bind(slug).first() as any;
+  const store = await c.env.DB.prepare(`SELECT id FROM stores WHERE slug = ? AND status = 'active'`).bind(slug).first() as any;
   if (!store) return c.json({ error: 'Loja não encontrada' }, 404);
 
   let query = `
-    SELECT p.*, pi.url as primary_image, c.name as category_name, c.slug as category_slug
+    SELECT p.id, p.store_id, p.sku, p.name, p.slug, p.short_description, p.description, p.price, p.original_price, p.promotional_price, p.category_id, p.brand_id, p.status, p.is_featured, p.is_on_sale, p.stock_quantity, p.dimensions, p.technical_specs, p.variations, pi.url as primary_image, c.name as category_name, c.slug as category_slug
     FROM products p
     LEFT JOIN product_images pi ON pi.product_id = p.id AND pi.is_primary = 1
     LEFT JOIN categories c ON p.category_id = c.id
@@ -120,7 +120,7 @@ publicRoutes.get('/stores/:slug/products', async (c) => {
   const products = await c.env.DB.prepare(query).bind(...params).all();
 
   // Count
-  let countQuery = 'SELECT COUNT(*) as count FROM products p LEFT JOIN categories c ON p.category_id = c.id WHERE p.store_id = ? AND p.status = "published"';
+  let countQuery = `SELECT COUNT(*) as count FROM products p LEFT JOIN categories c ON p.category_id = c.id WHERE p.store_id = ? AND p.status = 'published'`;
   const countParams: any[] = [store.id];
   if (q) {
     countQuery += ' AND (p.name LIKE ? OR p.description LIKE ? OR p.sku LIKE ? OR p.short_description LIKE ?)';
@@ -130,6 +130,7 @@ publicRoutes.get('/stores/:slug/products', async (c) => {
   if (minPrice) { countQuery += ' AND p.price >= ?'; countParams.push(parseFloat(minPrice)); }
   if (maxPrice) { countQuery += ' AND p.price <= ?'; countParams.push(parseFloat(maxPrice)); }
 
+  if (brand) { countQuery += ' AND p.brand_id = (SELECT id FROM brands WHERE slug = ? AND store_id = ? LIMIT 1)'; countParams.push(brand, store.id); }
   const total = await c.env.DB.prepare(countQuery).bind(...countParams).first() as any;
 
   return c.json({
@@ -143,11 +144,11 @@ publicRoutes.get('/stores/:slug/products/:productSlug', async (c) => {
   const slug = c.req.param('slug');
   const productSlug = c.req.param('productSlug');
 
-  const store = await c.env.DB.prepare('SELECT id, name, slug, whatsapp, phone FROM stores WHERE slug = ? AND status = "active"').bind(slug).first() as any;
+  const store = await c.env.DB.prepare(`SELECT id, name, slug, whatsapp, phone FROM stores WHERE slug = ? AND status = 'active'`).bind(slug).first() as any;
   if (!store) return c.json({ error: 'Loja não encontrada' }, 404);
 
   const product = await c.env.DB.prepare(`
-    SELECT p.*, c.name as category_name, c.slug as category_slug, b.name as brand_name
+    SELECT p.id, p.store_id, p.sku, p.name, p.slug, p.short_description, p.description, p.price, p.original_price, p.promotional_price, p.category_id, p.brand_id, p.status, p.is_featured, p.is_on_sale, p.stock_quantity, p.dimensions, p.technical_specs, p.variations, c.name as category_name, c.slug as category_slug, b.name as brand_name
     FROM products p
     LEFT JOIN categories c ON p.category_id = c.id
     LEFT JOIN brands b ON p.brand_id = b.id
@@ -156,11 +157,11 @@ publicRoutes.get('/stores/:slug/products/:productSlug', async (c) => {
 
   if (!product) return c.json({ error: 'Produto não encontrado' }, 404);
 
-  const images = await c.env.DB.prepare('SELECT * FROM product_images WHERE product_id = ? ORDER BY is_primary DESC, sort_order').bind(product.id).all();
+  const images = await c.env.DB.prepare('SELECT id, product_id, url, alt_text, is_primary, is_ai_generated, sort_order FROM product_images WHERE product_id = ? ORDER BY is_primary DESC, sort_order').bind(product.id).all();
 
   // Produtos relacionados (mesma categoria)
   const related = await c.env.DB.prepare(`
-    SELECT p.*, pi.url as primary_image FROM products p
+    SELECT p.id, p.store_id, p.sku, p.name, p.slug, p.short_description, p.description, p.price, p.original_price, p.promotional_price, p.category_id, p.brand_id, p.status, p.is_featured, p.is_on_sale, p.stock_quantity, p.dimensions, p.technical_specs, p.variations, pi.url as primary_image FROM products p
     LEFT JOIN product_images pi ON pi.product_id = p.id AND pi.is_primary = 1
     WHERE p.store_id = ? AND p.category_id = ? AND p.id != ? AND p.status = 'published'
     ORDER BY RANDOM() LIMIT 4
@@ -192,12 +193,15 @@ publicRoutes.post('/stores/:slug/analytics', async (c) => {
   const body = await c.req.json() as any;
   const { event_type, product_id, metadata } = body;
 
-  const store = await c.env.DB.prepare('SELECT id FROM stores WHERE slug = ?').bind(slug).first() as any;
+  const store = await c.env.DB.prepare('SELECT id FROM stores WHERE slug = ? AND status = \'active\'').bind(slug).first() as any;
   if (!store) return c.json({ error: 'Loja não encontrada' }, 404);
+
+  if (!['catalog_view','product_view','whatsapp_click','share_click','search','interest_list','banner_click'].includes(event_type)) return c.json({ error: 'Evento inválido' }, 400);
+  if (product_id && !await c.env.DB.prepare("SELECT id FROM products WHERE id = ? AND store_id = ? AND status = 'published'").bind(product_id, store.id).first()) return c.json({ error: 'Produto não encontrado' }, 404);
 
   // Incrementa clicks se for whatsapp_click
   if (event_type === 'whatsapp_click' && product_id) {
-    await c.env.DB.prepare('UPDATE products SET clicks = clicks + 1 WHERE id = ?').bind(product_id).run().catch(()=>{});
+    await c.env.DB.prepare('UPDATE products SET clicks = clicks + 1 WHERE id = ? AND store_id = ?').bind(product_id, store.id).run().catch(()=>{});
   }
 
   await c.env.DB.prepare(
@@ -213,7 +217,7 @@ publicRoutes.get('/search', async (c) => {
   if (!q || q.length < 2) return c.json({ products: [] });
 
   const products = await c.env.DB.prepare(`
-    SELECT p.*, s.name as store_name, s.slug as store_slug, pi.url as primary_image
+    SELECT p.id, p.store_id, p.sku, p.name, p.slug, p.short_description, p.description, p.price, p.original_price, p.promotional_price, p.category_id, p.brand_id, p.status, p.is_featured, p.is_on_sale, p.stock_quantity, p.dimensions, p.technical_specs, p.variations, s.name as store_name, s.slug as store_slug, pi.url as primary_image
     FROM products p
     JOIN stores s ON p.store_id = s.id
     LEFT JOIN product_images pi ON pi.product_id = p.id AND pi.is_primary = 1

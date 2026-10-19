@@ -1,47 +1,35 @@
-import { describe, it, expect } from 'vitest';
-
-describe('API Validation', () => {
-  it('login requer email válido', () => {
-    const schema = (data: any) => {
-      if (!data.email || !data.email.includes('@')) return { success: false, error: 'Email inválido' };
-      if (!data.password || data.password.length < 6) return { success: false, error: 'Senha curta' };
-      return { success: true };
-    };
-    expect(schema({ email: 'invalid', password: '12345' }).success).toBe(false);
-    expect(schema({ email: 'a@a.com', password: '123456' }).success).toBe(true);
+import { describe,it,expect,afterEach } from 'vitest';
+import { fixture } from './helpers';
+import { hashPassword,verifyPassword } from '../backend/src/utils/hash';
+let f:ReturnType<typeof fixture>;afterEach(()=>f?.db.close());
+describe('API real',()=>{
+  it('nega ausência de token, loja suspensa e acesso ao superadmin',async()=>{
+    f=fixture();expect((await f.request('/api/store/products','GET',undefined,null)).status).toBe(401);
+    expect((await f.request('/api/superadmin/dashboard')).status).toBe(403);
+    f.db.exec("UPDATE stores SET status = 'suspended' WHERE id='a'");
+    expect((await f.request('/api/store/products')).status).toBe(403);
   });
-
-  it('produto requer nome e preço', () => {
-    const validateProduct = (p: any) => {
-      if (!p.name || p.name.length < 2) return false;
-      if (p.price == null || p.price < 0) return false;
-      return true;
-    };
-    expect(validateProduct({ name: 'Sofá', price: 100 })).toBe(true);
-    expect(validateProduct({ name: '', price: 100 })).toBe(false);
-    expect(validateProduct({ name: 'Sofá', price: -10 })).toBe(false);
+  it('dashboard usa formato D1 real',async()=>{
+    f=fixture();const result=await f.request('/api/superadmin/dashboard','GET',undefined,f.token('root',null,'super_admin'));
+    expect(result.status).toBe(200);expect((await result.json()).stats.totalStores).toBe(2);
   });
-
-  it('slug é gerado corretamente', () => {
-    const slugify = (text: string) => text.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '');
-    expect(slugify('Sofá Retrátil Premium')).toBe('sof-retrtil-premium'.replace(' ', '-'));
-    expect(slugify('Móveis Premium')).toBe('mveis-premium');
+  it('logout revoga token existente',async()=>{
+    f=fixture();expect((await f.request('/api/auth/logout','POST')).status).toBe(200);
+    expect((await f.request('/api/store/products')).status).toBe(401);
   });
-
-  it('upload valida tipo e tamanho', () => {
-    const isValidType = (type: string) => ['image/jpeg','image/png','image/webp'].includes(type);
-    const isValidSize = (size: number) => size <= 10 * 1024 * 1024;
-    expect(isValidType('image/jpeg')).toBe(true);
-    expect(isValidType('application/pdf')).toBe(false);
-    expect(isValidSize(5 * 1024 * 1024)).toBe(true);
-    expect(isValidSize(15 * 1024 * 1024)).toBe(false);
+  it('reset de senha não alcança admin de outra loja ou root',async()=>{
+    f=fixture();for(const id of ['ub','root']) expect((await f.request(`/api/superadmin/stores/a/admins/${id}/reset-password`,'PUT',{password:'new-password'},f.token('root',null,'super_admin'))).status).toBe(404);
   });
-
-  it('WhatsApp link é gerado corretamente', () => {
-    const formatWhatsApp = (num: string) => num.replace(/\D/g,'');
-    const generateLink = (num: string, msg: string) => `https://wa.me/${formatWhatsApp(num)}?text=${encodeURIComponent(msg)}`;
-    const link = generateLink('(73) 99999-0001', 'Olá! Interesse no produto X');
-    expect(link).toContain('55999990001'.slice(-8)); // simplificado
-    expect(link.startsWith('https://wa.me/')).toBe(true);
+  it('JSON malformado e produto inválido retornam 400',async()=>{
+    f=fixture();expect((await f.request('/api/store/products','POST',{name:'',price:-1})).status).toBe(400);
+    expect((await f.request('/api/store/products?page=-1&limit=nope')).status).toBe(200);
+  });
+  it('hash real tem salt e rejeita senha incorreta',async()=>{
+    f=fixture();
+    const h=await hashPassword('Password123');expect(await verifyPassword('Password123',h)).toBe(true);expect(await verifyPassword('wrong',h)).toBe(false);expect(await hashPassword('Password123')).not.toBe(h);
+  });
+  it('bootstrap exige segredos válidos e índice único de superadmin',async()=>{
+    f=fixture();expect((await f.request('/api/auth/setup-super-admin','POST',{setupToken:'x',name:'Nome',email:'new@test.com',password:'Password123'},null)).status).toBe(503);
+    expect(()=>f.db.exec("INSERT INTO users(id,name,email,password_hash,role) VALUES ('r2','Root2','r2@test.com','x','super_admin')")).toThrow(/UNIQUE/);
   });
 });

@@ -34,6 +34,23 @@ function getStoreId(c: any): string {
   return c.get('storeId') || user.storeId;
 }
 
+// Resolve tenant once, before every handler. Query parameters never override a store administrator.
+store.use('*', async (c, next) => {
+  const storeId = getStoreId(c);
+  if (!storeId) return c.json({ error: 'Selecione uma loja' }, 400);
+  const tenant = await c.env.DB.prepare("SELECT id FROM stores WHERE id = ? AND status != 'deleted'").bind(storeId).first();
+  if (!tenant) return c.json({ error: 'Loja não encontrada' }, 404);
+  c.set('storeId', storeId);
+  await next();
+});
+
+async function validRelations(c: any, data: any, storeId: string) {
+  for (const [field, table] of [['category_id', 'categories'], ['brand_id', 'brands'], ['parent_id', 'categories']]) {
+    if (data[field] && !await c.env.DB.prepare(`SELECT id FROM ${table} WHERE id = ? AND store_id = ?`).bind(data[field], storeId).first()) return false;
+  }
+  return true;
+}
+
 // =====================
 // DASHBOARD
 // =====================
@@ -85,8 +102,8 @@ store.get('/products', async (c) => {
   const category = c.req.query('category');
   const status = c.req.query('status');
   const featured = c.req.query('featured');
-  const page = parseInt(c.req.query('page') || '1');
-  const limit = Math.min(parseInt(c.req.query('limit') || '20'), 100);
+  const page = Math.max(1, Number.parseInt(c.req.query('page') || '1') || 1);
+  const limit = Math.min(100, Math.max(1, Number.parseInt(c.req.query('limit') || '20') || 20));
   const offset = (page - 1) * limit;
 
   let query = `
@@ -132,6 +149,8 @@ store.get('/products', async (c) => {
     countQuery += ' AND status = ?';
     countParams.push(status);
   }
+  if (category) { countQuery += ' AND category_id = ?'; countParams.push(category); }
+  if (featured === 'true') countQuery += ' AND is_featured = 1';
   const total = await c.env.DB.prepare(countQuery).bind(...countParams).first() as any;
 
   return c.json({
@@ -154,7 +173,8 @@ store.get('/products/:id', async (c) => {
 
 store.post('/products', zValidator('json', createProductSchema), async (c) => {
   const storeId = getStoreId(c);
-  const data = c.req.valid('json' as any) as any;
+  const data = c.req.valid('json');
+  if (!await validRelations(c, data, storeId)) return c.json({ error: 'Referência não pertence à loja' }, 400);
   const user = c.get('user');
 
   let slug = data.slug ? slugify(data.slug) : slugify(data.name);
@@ -168,7 +188,7 @@ store.post('/products', zValidator('json', createProductSchema), async (c) => {
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).bind(
     productId, storeId, data.sku || null, data.name, slug, data.short_description || null,
-    data.description || null, data.price, data.original_price || null, data.promotional_price || null,
+    data.description || null, data.price, data.original_price ?? null, data.promotional_price ?? null,
     data.category_id || null, data.brand_id || null, data.status || 'draft',
     data.is_featured ? 1 : 0, data.is_on_sale ? 1 : 0, data.stock_quantity || 0,
     data.dimensions || null, data.technical_specs || null, data.variations || null,
@@ -195,7 +215,8 @@ store.post('/products', zValidator('json', createProductSchema), async (c) => {
 store.put('/products/:id', zValidator('json', createProductSchema.partial()), async (c) => {
   const storeId = getStoreId(c);
   const id = c.req.param('id');
-  const data = c.req.valid('json' as any) as any;
+  const data = c.req.valid('json');
+  if (!await validRelations(c, data, storeId)) return c.json({ error: 'Referência não pertence à loja' }, 400);
   const user = c.get('user');
 
   const existing = await c.env.DB.prepare('SELECT * FROM products WHERE id = ? AND store_id = ?').bind(id, storeId).first() as any;
@@ -205,7 +226,7 @@ store.put('/products/:id', zValidator('json', createProductSchema.partial()), as
   const params: any[] = [];
   const allowed = ['sku','name','short_description','description','price','original_price','promotional_price','category_id','brand_id','status','stock_quantity','dimensions','technical_specs','variations'];
   
-  for (const key of allowed) {
+  for (const key of allowed as Extract<keyof typeof data, string>[]) {
     if (data[key] !== undefined) {
       updates.push(`${key} = ?`);
       params.push(data[key]);
@@ -303,20 +324,23 @@ store.get('/categories', async (c) => {
 
 store.post('/categories', zValidator('json', createCategorySchema), async (c) => {
   const storeId = getStoreId(c);
-  const data = c.req.valid('json' as any) as any;
+  const data = c.req.valid('json');
+  if (!await validRelations(c, data, storeId)) return c.json({ error: 'Referência não pertence à loja' }, 400);
   const slug = data.slug ? slugify(data.slug) : slugify(data.name);
   
   const id = crypto.randomUUID();
   await c.env.DB.prepare('INSERT INTO categories (id, store_id, name, slug, description, parent_id, sort_order) VALUES (?, ?, ?, ?, ?, ?, ?)').bind(id, storeId, data.name, slug, data.description || null, data.parent_id || null, data.sort_order || 0).run();
   
-  const category = await c.env.DB.prepare('SELECT * FROM categories WHERE id = ?').bind(id).first();
+  const category = await c.env.DB.prepare('SELECT * FROM categories WHERE id = ? AND store_id = ?').bind(id, storeId).first();
+  if (!category) return c.json({ error: 'Recurso não encontrado' }, 404);
   return c.json({ category, message: 'Categoria criada!' }, 201);
 });
 
 store.put('/categories/:id', zValidator('json', createCategorySchema.partial()), async (c) => {
   const storeId = getStoreId(c);
   const id = c.req.param('id');
-  const data = c.req.valid('json' as any) as any;
+  const data = c.req.valid('json');
+  if (!await validRelations(c, data, storeId)) return c.json({ error: 'Referência não pertence à loja' }, 400);
   
   const updates: string[] = [];
   const params: any[] = [];
@@ -333,7 +357,8 @@ store.put('/categories/:id', zValidator('json', createCategorySchema.partial()),
   params.push(id, storeId);
   
   await c.env.DB.prepare(`UPDATE categories SET ${updates.join(', ')} WHERE id = ? AND store_id = ?`).bind(...params).run();
-  const category = await c.env.DB.prepare('SELECT * FROM categories WHERE id = ?').bind(id).first();
+  const category = await c.env.DB.prepare('SELECT * FROM categories WHERE id = ? AND store_id = ?').bind(id, storeId).first();
+  if (!category) return c.json({ error: 'Recurso não encontrado' }, 404);
   return c.json({ category, message: 'Categoria atualizada!' });
 });
 
@@ -355,18 +380,21 @@ store.get('/brands', async (c) => {
 
 store.post('/brands', zValidator('json', createBrandSchema), async (c) => {
   const storeId = getStoreId(c);
-  const data = c.req.valid('json' as any) as any;
+  const data = c.req.valid('json');
+  if (!await validRelations(c, data, storeId)) return c.json({ error: 'Referência não pertence à loja' }, 400);
   const slug = data.slug ? slugify(data.slug) : slugify(data.name);
   const id = crypto.randomUUID();
   await c.env.DB.prepare('INSERT INTO brands (id, store_id, name, slug, description) VALUES (?, ?, ?, ?, ?)').bind(id, storeId, data.name, slug, data.description || null).run();
-  const brand = await c.env.DB.prepare('SELECT * FROM brands WHERE id = ?').bind(id).first();
+  const brand = await c.env.DB.prepare('SELECT * FROM brands WHERE id = ? AND store_id = ?').bind(id, storeId).first();
+  if (!brand) return c.json({ error: 'Recurso não encontrado' }, 404);
   return c.json({ brand, message: 'Marca criada!' }, 201);
 });
 
 store.put('/brands/:id', zValidator('json', createBrandSchema.partial()), async (c) => {
   const storeId = getStoreId(c);
   const id = c.req.param('id');
-  const data = c.req.valid('json' as any) as any;
+  const data = c.req.valid('json');
+  if (!await validRelations(c, data, storeId)) return c.json({ error: 'Referência não pertence à loja' }, 400);
   const updates: string[] = [];
   const params: any[] = [];
   if (data.name) { updates.push('name = ?'); params.push(data.name); updates.push('slug = ?'); params.push(slugify(data.slug || data.name)); }
@@ -375,7 +403,8 @@ store.put('/brands/:id', zValidator('json', createBrandSchema.partial()), async 
   updates.push("updated_at = datetime('now')");
   params.push(id, storeId);
   await c.env.DB.prepare(`UPDATE brands SET ${updates.join(', ')} WHERE id = ? AND store_id = ?`).bind(...params).run();
-  const brand = await c.env.DB.prepare('SELECT * FROM brands WHERE id = ?').bind(id).first();
+  const brand = await c.env.DB.prepare('SELECT * FROM brands WHERE id = ? AND store_id = ?').bind(id, storeId).first();
+  if (!brand) return c.json({ error: 'Recurso não encontrado' }, 404);
   return c.json({ brand, message: 'Marca atualizada!' });
 });
 
@@ -397,27 +426,31 @@ store.get('/banners', async (c) => {
 
 store.post('/banners', zValidator('json', createBannerSchema), async (c) => {
   const storeId = getStoreId(c);
-  const data = c.req.valid('json' as any) as any;
+  const data = c.req.valid('json');
+  if (!await validRelations(c, data, storeId)) return c.json({ error: 'Referência não pertence à loja' }, 400);
   const id = crypto.randomUUID();
   await c.env.DB.prepare('INSERT INTO banners (id, store_id, title, subtitle, image_url, link_url, button_text, position, is_active, sort_order) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').bind(id, storeId, data.title || null, data.subtitle || null, data.image_url, data.link_url || null, data.button_text || null, data.position || 'hero', data.is_active ? 1 : 0, data.sort_order || 0).run();
-  const banner = await c.env.DB.prepare('SELECT * FROM banners WHERE id = ?').bind(id).first();
+  const banner = await c.env.DB.prepare('SELECT * FROM banners WHERE id = ? AND store_id = ?').bind(id, storeId).first();
+  if (!banner) return c.json({ error: 'Recurso não encontrado' }, 404);
   return c.json({ banner, message: 'Banner criado!' }, 201);
 });
 
 store.put('/banners/:id', zValidator('json', createBannerSchema.partial()), async (c) => {
   const storeId = getStoreId(c);
   const id = c.req.param('id');
-  const data = c.req.valid('json' as any) as any;
+  const data = c.req.valid('json');
+  if (!await validRelations(c, data, storeId)) return c.json({ error: 'Referência não pertence à loja' }, 400);
   const updates: string[] = [];
   const params: any[] = [];
   const fields = ['title','subtitle','image_url','link_url','button_text','position','sort_order'];
-  for (const f of fields) if (data[f] !== undefined) { updates.push(`${f} = ?`); params.push(data[f]); }
+  for (const f of fields as Extract<keyof typeof data, string>[]) if (data[f] !== undefined) { updates.push(`${f} = ?`); params.push(data[f]); }
   if (data.is_active !== undefined) { updates.push('is_active = ?'); params.push(data.is_active ? 1 : 0); }
   if (updates.length === 0) return c.json({ error: 'Nenhum campo' }, 400);
   updates.push("updated_at = datetime('now')");
   params.push(id, storeId);
   await c.env.DB.prepare(`UPDATE banners SET ${updates.join(', ')} WHERE id = ? AND store_id = ?`).bind(...params).run();
-  const banner = await c.env.DB.prepare('SELECT * FROM banners WHERE id = ?').bind(id).first();
+  const banner = await c.env.DB.prepare('SELECT * FROM banners WHERE id = ? AND store_id = ?').bind(id, storeId).first();
+  if (!banner) return c.json({ error: 'Recurso não encontrado' }, 404);
   return c.json({ banner, message: 'Banner atualizado!' });
 });
 
@@ -446,7 +479,7 @@ store.put('/settings', async (c) => {
   const allowed = ['name','description','logo_url','banner_url','primary_color','secondary_color','accent_color','address','city','state','zip_code','phone','whatsapp','email','instagram','facebook','website','opening_hours','seo_title','seo_description','seo_keywords'];
   const updates: string[] = [];
   const params: any[] = [];
-  for (const key of allowed) {
+  for (const key of allowed as Extract<keyof typeof data, string>[]) {
     if (data[key] !== undefined) {
       updates.push(`${key} = ?`);
       params.push(data[key]);
@@ -480,6 +513,9 @@ store.post('/ai/generate', async (c) => {
   const { image_url, style = 'modern_room', product_id, generate_description = true, generate_image = true } = body;
 
   if (!image_url) return c.json({ error: 'Imagem obrigatória' }, 400);
+
+  if (c.env.AI_ENABLED !== 'true') return c.json({ error: 'IA indisponível' }, 503);
+  if (product_id && !await c.env.DB.prepare('SELECT id FROM products WHERE id = ? AND store_id = ?').bind(product_id, storeId).first()) return c.json({ error: 'Produto não encontrado' }, 404);
 
   // Verifica limites
   const storeData = await c.env.DB.prepare('SELECT ai_enabled, ai_daily_limit, ai_monthly_limit FROM stores WHERE id = ?').bind(storeId).first() as any;
@@ -604,7 +640,7 @@ store.post('/ai/approve-image', async (c) => {
 // =====================
 store.get('/analytics', async (c) => {
   const storeId = getStoreId(c);
-  const days = parseInt(c.req.query('days') || '30');
+  const days = Math.min(365, Math.max(1, Number.parseInt(c.req.query('days') || '30') || 30));
   
   const views = await c.env.DB.prepare(`
     SELECT date(created_at) as date, COUNT(*) as count 

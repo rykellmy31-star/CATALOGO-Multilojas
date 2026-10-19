@@ -4,6 +4,7 @@ export interface JWTPayload {
   email: string;
   role: 'super_admin' | 'store_admin';
   storeId: string | null;
+  version?: number;
   iat?: number;
   exp?: number;
 }

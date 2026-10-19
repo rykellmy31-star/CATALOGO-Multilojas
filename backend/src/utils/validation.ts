@@ -55,7 +55,8 @@ export const createCategorySchema = z.object({
   slug: z.string().optional(),
   description: z.string().optional(),
   parent_id: z.string().optional().nullable(),
-  sort_order: z.coerce.number().optional()
+  sort_order: z.coerce.number().int().min(0).optional(),
+  is_active: z.boolean().optional()
 });
 
 export const createBrandSchema = z.object({
