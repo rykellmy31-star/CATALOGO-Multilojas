@@ -24,5 +24,13 @@ jobs:
           node-version: '22'
           cache: npm
       - run: npm ci
-      - run: npm test --if-present
-      - run: npm run build --if-present
+      - name: Auditar dependências
+        run: npm audit --audit-level=moderate
+      - run: npm test
+      - run: npm run build
+      - name: Validar migrações no D1 local
+        run: npm run db:migrate
+      - name: Validar empacotamento sem publicar
+        run: npx wrangler deploy --dry-run --outdir /tmp/catalogo-worker
+        env:
+          WRANGLER_SEND_METRICS: false

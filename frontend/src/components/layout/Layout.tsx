@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import api from '../../lib/api';
+import React, { useState, useEffect } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import { 
@@ -89,6 +90,8 @@ export function StoreAdminLayout({ children }: { children: React.ReactNode }) {
   const location = useLocation();
   const navigate = useNavigate();
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [catalogSlug, setCatalogSlug] = useState('');
+  useEffect(() => { api.get('/store/settings').then(r => setCatalogSlug(r.data.store?.slug || '')).catch(() => {}); }, [location.pathname]);
   const handleLogout = () => { logout(); navigate('/login'); };
 
   const nav = [
@@ -127,7 +130,7 @@ export function StoreAdminLayout({ children }: { children: React.ReactNode }) {
             );
           })}
           <div className="pt-4 mt-4 border-t">
-            <a href={`/loja/${localStorage.getItem('storeSlug') || 'moveis-premium'}`} target="_blank" rel="noreferrer"
+            <a href={catalogSlug ? `/loja/${catalogSlug}` : '/admin/configuracoes'} target="_blank" rel="noreferrer"
               className="flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium text-sky-600 hover:bg-sky-50">
               <Eye className="w-5 h-5" /> Ver Catálogo
             </a>

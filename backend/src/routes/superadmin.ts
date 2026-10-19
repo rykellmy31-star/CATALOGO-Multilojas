@@ -2,7 +2,7 @@ import { Hono } from 'hono';
 import { authMiddleware, requireRole } from '../middleware/auth.js';
 import { tenantMiddleware } from '../middleware/tenant.js';
 import { zValidator } from '../middleware/validation.js';
-import { createStoreSchema } from '../utils/validation.js';
+import { createStoreSchema, storeAdminSchema } from '../utils/validation.js';
 import { hashPassword } from '../utils/hash.js';
 import { slugify } from '../utils/slug.js';
 
@@ -137,7 +137,7 @@ superadmin.put('/stores/:id', zValidator('json', createStoreSchema.partial()), a
   for (const key of allowed) {
     if (data[key] !== undefined) {
       updates.push(`${key} = ?`);
-      params.push(data[key]);
+      params.push(typeof data[key] === 'boolean' ? Number(data[key]) : data[key]);
     }
   }
   if (data.slug) {
@@ -175,9 +175,9 @@ superadmin.delete('/stores/:id', async (c) => {
 });
 
 // POST /api/superadmin/stores/:id/admins - criar admin da loja
-superadmin.post('/stores/:id/admins', async (c) => {
+superadmin.post('/stores/:id/admins', zValidator('json', storeAdminSchema), async (c) => {
   const storeId = c.req.param('id');
-  const { name, email, password } = await c.req.json() as any;
+  const { name, email, password } = c.req.valid('json');
   
   if (!name || !email || !password) return c.json({ error: 'Nome, email e senha são obrigatórios' }, 400);
   if (password.length < 6) return c.json({ error: 'Senha deve ter no mínimo 6 caracteres' }, 400);
@@ -204,9 +204,9 @@ superadmin.post('/stores/:id/admins', async (c) => {
 });
 
 // PUT /api/superadmin/stores/:id/admins/:adminId/reset-password
-superadmin.put('/stores/:id/admins/:adminId/reset-password', async (c) => {
+superadmin.put('/stores/:id/admins/:adminId/reset-password', zValidator('json', storeAdminSchema.pick({ password: true })), async (c) => {
   const adminId = c.req.param('adminId');
-  const { password } = await c.req.json() as any;
+  const { password } = c.req.valid('json');
   if (!password || password.length < 6) return c.json({ error: 'Senha inválida' }, 400);
 
   const storeId = c.req.param('id');
@@ -241,7 +241,7 @@ superadmin.put('/platform-config', async (c) => {
   for (const key of allowed) {
     if (data[key] !== undefined) {
       updates.push(`${key} = ?`);
-      params.push(data[key]);
+      params.push(typeof data[key] === 'boolean' ? Number(data[key]) : data[key]);
     }
   }
   if (updates.length === 0) return c.json({ error: 'Nenhum campo para atualizar' }, 400);

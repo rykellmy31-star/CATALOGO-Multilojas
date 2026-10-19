@@ -3,8 +3,6 @@
 -- Multi-tenant Isolation + Audit + IA + Analytics
 -- ============================================
 
-PRAGMA foreign_keys = ON;
-PRAGMA journal_mode = WAL;
 
 -- =====================
 -- PLATFORM CONFIG

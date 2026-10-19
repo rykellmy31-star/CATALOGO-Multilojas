@@ -28,6 +28,28 @@ describe('API real',()=>{
     f=fixture();
     const h=await hashPassword('Password123');expect(await verifyPassword('Password123',h)).toBe(true);expect(await verifyPassword('wrong',h)).toBe(false);expect(await hashPassword('Password123')).not.toBe(h);
   });
+  it('limita tentativas de login com contador persistente',async()=>{
+    f=fixture();
+    for(let i=0;i<20;i++) expect((await f.request('/api/auth/login','POST',{email:'missing@test.com',password:'Password123'},null)).status).toBe(401);
+    const result=await f.request('/api/auth/login','POST',{email:'missing@test.com',password:'Password123'},null);
+    expect(result.status).toBe(429);expect(result.headers.get('Retry-After')).toBeTruthy();
+  });
+  it('CRUD completo preserva imagens e exclusão',async()=>{
+    f=fixture();
+    const result=await f.request('/api/store/products','POST',{name:'Novo produto',price:0,images:['https://example.com/a.png','https://example.com/b.png'],category_id:'ca'});
+    expect(result.status).toBe(201);const {product}=await result.json();
+    expect((await f.request(`/api/store/products/${product.id}`,'PUT',{name:'Atualizado',images:['https://example.com/b.png']})).status).toBe(200);
+    const data=await (await f.request(`/api/store/products/${product.id}`)).json();expect(data.images.map((x:any)=>x.url)).toEqual(['https://example.com/b.png']);
+    expect((await f.request(`/api/store/products/${product.id}`,'DELETE')).status).toBe(200);
+    expect((await f.request(`/api/store/products/${product.id}`)).status).toBe(404);
+  });
+  it('login real e reset invalidam sessão anterior',async()=>{
+    f=fixture();f.db.prepare("UPDATE users SET password_hash = ? WHERE id = 'ua'").run(await hashPassword('Password123'));
+    const login=await f.request('/api/auth/login','POST',{email:'a@test.com',password:'Password123'},null);expect(login.status).toBe(200);
+    const {token}=await login.json();expect((await f.request('/api/auth/me','GET',undefined,token)).status).toBe(200);
+    expect((await f.request('/api/superadmin/stores/a/admins/ua/reset-password','PUT',{password:'NewPassword123'},f.token('root',null,'super_admin'))).status).toBe(200);
+    expect((await f.request('/api/auth/me','GET',undefined,token)).status).toBe(401);
+  });
   it('bootstrap exige segredos válidos e índice único de superadmin',async()=>{
     f=fixture();expect((await f.request('/api/auth/setup-super-admin','POST',{setupToken:'x',name:'Nome',email:'new@test.com',password:'Password123'},null)).status).toBe(503);
     expect(()=>f.db.exec("INSERT INTO users(id,name,email,password_hash,role) VALUES ('r2','Root2','r2@test.com','x','super_admin')")).toThrow(/UNIQUE/);

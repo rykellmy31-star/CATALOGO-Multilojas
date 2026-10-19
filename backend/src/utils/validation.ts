@@ -2,14 +2,14 @@ import { z } from 'zod';
 
 export const loginSchema = z.object({
   email: z.string().email('Email inválido'),
-  password: z.string().min(6, 'Senha deve ter no mínimo 6 caracteres')
+  password: z.string().min(6, 'Senha deve ter no mínimo 6 caracteres').max(72)
 });
 
 export const setupSuperAdminSchema = z.object({
   setupToken: z.string().min(1, 'Token obrigatório'),
   name: z.string().min(2, 'Nome obrigatório'),
   email: z.string().email('Email inválido'),
-  password: z.string().min(8, 'Senha deve ter no mínimo 8 caracteres')
+  password: z.string().min(8, 'Senha deve ter no mínimo 8 caracteres').max(72)
 });
 
 export const createStoreSchema = z.object({
@@ -25,6 +25,10 @@ export const createStoreSchema = z.object({
   primary_color: z.string().optional(),
   secondary_color: z.string().optional(),
   accent_color: z.string().optional(),
+  storage_limit_mb: z.number().int().min(1).max(102400).optional(),
+  ai_enabled: z.boolean().optional(),
+  ai_daily_limit: z.number().int().min(0).max(10000).optional(),
+  ai_monthly_limit: z.number().int().min(0).max(100000).optional(),
   plan: z.enum(['free', 'pro', 'enterprise']).optional(),
   status: z.enum(['active', 'suspended', 'pending']).optional()
 });
@@ -47,7 +51,7 @@ export const createProductSchema = z.object({
   dimensions: z.string().optional().nullable(),
   technical_specs: z.string().optional().nullable(),
   variations: z.string().optional().nullable(),
-  images: z.array(z.string()).optional()
+  images: z.array(z.string().max(4096)).max(50).optional()
 });
 
 export const createCategorySchema = z.object({
@@ -82,4 +86,10 @@ export const aiGenerateSchema = z.object({
   style: z.enum(['modern_room', 'white_background', 'promotional', 'premium_catalog']).default('modern_room'),
   generate_description: z.boolean().optional().default(true),
   generate_image: z.boolean().optional().default(true)
+});
+
+export const storeAdminSchema = z.object({
+  name: z.string().trim().min(2).max(200),
+  email: z.string().trim().email().max(254),
+  password: z.string().min(8).max(72)
 });

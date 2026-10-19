@@ -18,6 +18,7 @@ export default function ProductForm() {
   });
   const [images, setImages] = useState<string[]>([]);
   const [existingImages, setExistingImages] = useState<any[]>([]);
+  const [previewOpen, setPreviewOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [uploading, setUploading] = useState(false);
   
@@ -37,7 +38,7 @@ export default function ProductForm() {
         const p = r.data.product;
         setForm({
           name: p.name || '', sku: p.sku || '', short_description: p.short_description || '', description: p.description || '',
-          price: p.price || '', original_price: p.original_price || '', promotional_price: p.promotional_price || '',
+          price: p.price ?? '', original_price: p.original_price || '', promotional_price: p.promotional_price || '',
           category_id: p.category_id || '', brand_id: p.brand_id || '', status: p.status || 'draft',
           is_featured: !!p.is_featured, is_on_sale: !!p.is_on_sale, stock_quantity: p.stock_quantity || 0,
           dimensions: p.dimensions || '', technical_specs: p.technical_specs || ''
@@ -55,7 +56,6 @@ export default function ProductForm() {
       for (const file of Array.from(files)) {
         const fd = new FormData();
         fd.append('file', file);
-        if (id) fd.append('productId', id);
         const { data } = await api.post('/upload', fd, { headers: { 'Content-Type': 'multipart/form-data' } });
         setImages(prev => [...prev, data.url]);
         if (!aiImage) setAiImage(data.url);
@@ -66,7 +66,7 @@ export default function ProductForm() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!form.name || !form.price) return toast.error('Nome e preço são obrigatórios');
+    if (!form.name || form.price === '' || form.price == null) return toast.error('Nome e preço são obrigatórios');
     setLoading(true);
     try {
       const payload = {
@@ -76,7 +76,7 @@ export default function ProductForm() {
         promotional_price: form.promotional_price ? parseFloat(form.promotional_price) : null,
         category_id: form.category_id || null,
         brand_id: form.brand_id || null,
-        images: images.length > 0 ? images : undefined
+        images: [...existingImages.map(image => image.url), ...images]
       };
       if (isEdit) {
         await api.put(`/store/products/${id}`, payload);
@@ -149,13 +149,14 @@ export default function ProductForm() {
         </div>
         {isEdit && (
           <div className="flex gap-2">
-            <a href="#" onClick={e=>{e.preventDefault(); toast.info('Pré-visualização em breve');}} className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border bg-white hover:bg-gray-50 text-sm font-medium">
+            <button type="button" onClick={()=>setPreviewOpen(true)} className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border bg-white hover:bg-gray-50 text-sm font-medium">
               <Eye className="w-4 h-4" /> Pré-visualizar
-            </a>
+            </button>
           </div>
         )}
       </div>
 
+      {previewOpen && <div role="dialog" aria-modal="true" aria-label="Prévia do produto" className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4" onClick={()=>setPreviewOpen(false)}><div className="max-w-lg w-full bg-white p-6 rounded-2xl" onClick={e=>e.stopPropagation()}><button type="button" onClick={()=>setPreviewOpen(false)} className="float-right" aria-label="Fechar prévia">✕</button><img src={getImageUrl(existingImages[0]?.url || images[0])} alt={form.name} className="w-full h-64 object-contain"/><h2 className="text-2xl font-bold mt-4">{form.name}</h2><p className="text-xl mt-2">{Number(form.price || 0).toLocaleString('pt-BR',{style:'currency',currency:'BRL'})}</p><p className="mt-4 whitespace-pre-line">{form.description}</p></div></div>}
       {/* IA Banner */}
       <Card className="p-0 overflow-hidden border-sky-200">
         <div className="bg-gradient-to-r from-sky-600 via-violet-600 to-indigo-600 p-4 flex items-center justify-between">

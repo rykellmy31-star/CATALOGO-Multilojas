@@ -42,12 +42,6 @@ export default function Login() {
     } finally { setLoading(false); }
   };
 
-  const fillDemo = (role: 'super' | 'loja1' | 'loja2') => {
-    if (role === 'super') { setEmail('super@catalogospro.com'); setPassword('Super123!'); }
-    if (role === 'loja1') { setEmail('admin@moveispremium.com'); setPassword('Loja123!'); }
-    if (role === 'loja2') { setEmail('admin@eletrocenter.com'); setPassword('Loja123!'); }
-  };
-
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-sky-900 flex">
       {/* Left - Branding */}
@@ -110,31 +104,9 @@ export default function Login() {
               <Button type="submit" loading={loading} className="w-full" size="lg">Entrar na Plataforma</Button>
             </form>
 
-            <div className="mt-6 pt-6 border-t">
-              <p className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-3">Acesso rápido (demo)</p>
-              <div className="grid grid-cols-3 gap-2">
-                <button onClick={()=>fillDemo('super')} className="px-3 py-2.5 rounded-xl bg-slate-900 text-white text-xs font-medium hover:bg-slate-800 flex flex-col items-center gap-1">
-                  <Shield className="w-4 h-4" /> Super Admin
-                </button>
-                <button onClick={()=>fillDemo('loja1')} className="px-3 py-2.5 rounded-xl bg-sky-600 text-white text-xs font-medium hover:bg-sky-700 flex flex-col items-center gap-1">
-                  <Store className="w-4 h-4" /> Móveis
-                </button>
-                <button onClick={()=>fillDemo('loja2')} className="px-3 py-2.5 rounded-xl border border-gray-200 text-gray-700 text-xs font-medium hover:bg-gray-50 flex flex-col items-center gap-1">
-                  <Store className="w-4 h-4" /> Eletro
-                </button>
-              </div>
-              <p className="text-xs text-gray-400 mt-3 text-center">Senhas: Super123! / Loja123!</p>
-            </div>
           </Card>
 
-          <div className="mt-6 text-center">
-            <p className="text-sm text-gray-500">Quer ver os catálogos públicos?</p>
-            <div className="flex justify-center gap-2 mt-2 flex-wrap">
-              <Link to="/loja/moveis-premium" className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-gray-100 hover:bg-gray-200 text-xs font-medium"><Eye className="w-3 h-3" /> Móveis Premium</Link>
-              <Link to="/loja/eletro-center" className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-gray-100 hover:bg-gray-200 text-xs font-medium"><Eye className="w-3 h-3" /> Eletro Center</Link>
-              <Link to="/loja/decor-art" className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-gray-100 hover:bg-gray-200 text-xs font-medium"><Eye className="w-3 h-3" /> Decor Art</Link>
-            </div>
-          </div>
+
         </div>
       </div>
     </div>

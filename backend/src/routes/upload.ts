@@ -47,6 +47,12 @@ upload.post('/', async (c) => {
   }
 
   const arrayBuffer = await file.arrayBuffer();
+  const bytes = new Uint8Array(arrayBuffer);
+  const validImage = file.type.includes('png') ? bytes[0] === 137 && bytes[1] === 80 && bytes[2] === 78 && bytes[3] === 71
+    : file.type.includes('webp') ? new TextDecoder().decode(bytes.slice(0,4)) === 'RIFF' && new TextDecoder().decode(bytes.slice(8,12)) === 'WEBP'
+    : file.type.includes('gif') ? new TextDecoder().decode(bytes.slice(0,3)) === 'GIF'
+    : bytes[0] === 255 && bytes[1] === 216 && bytes[2] === 255;
+  if (!validImage) return c.json({ error: 'Conteúdo de imagem inválido' }, 400);
   const ext = ({ 'image/jpeg': 'jpg', 'image/jpg': 'jpg', 'image/png': 'png', 'image/webp': 'webp', 'image/gif': 'gif' } as Record<string, string>)[file.type];
   const timestamp = Date.now();
   const random = Math.random().toString(36).substring(2, 8);
@@ -85,8 +91,11 @@ upload.post('/', async (c) => {
 upload.get('/storage/:key{.*}', async (c) => {
   const key = c.req.param('key');
   if (!key.startsWith('stores/') || key.includes('..')) return c.json({ error: 'Arquivo não encontrado' }, 404);
-  const image = await c.env.DB.prepare("SELECT pi.id FROM product_images pi JOIN products p ON pi.product_id = p.id AND pi.store_id = p.store_id JOIN stores s ON p.store_id = s.id WHERE pi.url = ? AND p.status = 'published' AND s.status = 'active'").bind(`/api/storage/${encodeURIComponent(key)}`).first();
-  if (!image) return c.json({ error: 'Arquivo não encontrado' }, 404);
+  const image = await c.env.DB.prepare("SELECT pi.id FROM product_images pi JOIN products p ON pi.product_id = p.id AND pi.store_id = p.store_id JOIN stores s ON p.store_id = s.id WHERE pi.url = ? AND p.status = 'published' AND s.status = 'active' AND pi.store_id = ?").bind(`/api/storage/${encodeURIComponent(key)}`, key.split('/')[1]).first();
+  const url = `/api/storage/${encodeURIComponent(key)}`;
+  const branding = image ? null : await c.env.DB.prepare(`SELECT id FROM stores WHERE status = 'active' AND id = ? AND (logo_url = ? OR banner_url = ?)
+    UNION ALL SELECT b.id FROM banners b JOIN stores s ON b.store_id = s.id WHERE b.store_id = ? AND b.image_url = ? AND b.is_active = 1 AND s.status = 'active'`).bind(key.split('/')[1], url, url, key.split('/')[1], url).first();
+  if (!image && !branding) return c.json({ error: 'Arquivo não encontrado' }, 404);
   try {
     const obj = await c.env.STORAGE.get(key);
     if (!obj) return c.json({ error: 'Arquivo não encontrado' }, 404);

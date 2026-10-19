@@ -25,7 +25,7 @@ export default function Setup() {
       localStorage.setItem('token', data.token);
       localStorage.setItem('user', JSON.stringify(data.user));
       setSuccess(true);
-      setTimeout(()=> navigate('/super-admin'), 1500);
+      setTimeout(()=> window.location.assign('/super-admin'), 1500);
     } catch (err: any) {
       setError(err.response?.data?.error || 'Erro ao criar Super Admin');
     } finally { setLoading(false); }
@@ -68,13 +68,13 @@ export default function Setup() {
                 <AlertTriangle className="w-5 h-5 text-amber-600 flex-shrink-0" />
                 <div className="text-sm text-amber-800">
                   <p className="font-medium">Token de configuração necessário</p>
-                  <p className="text-xs mt-1">Encontre o <code>SUPER_ADMIN_SETUP_TOKEN</code> no seu arquivo <code>.dev.vars</code>. Valor padrão para desenvolvimento: <code className="bg-amber-100 px-1 rounded">setup-dev-token-change-me</code></p>
+                  <p className="text-xs mt-1">Use o token privado fornecido pelo responsável pela implantação.</p>
                 </div>
               </div>
 
               {error && <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-xl px-4 py-3">{error}</div>}
 
-              <Input label="Token de Configuração" placeholder="setup-dev-token-change-me" value={form.setupToken} onChange={e=>setForm({...form, setupToken: e.target.value})} required hint="Definido em SUPER_ADMIN_SETUP_TOKEN no .dev.vars" />
+              <Input label="Token de Configuração" type="password" placeholder="Seu token privado" value={form.setupToken} onChange={e=>setForm({...form, setupToken: e.target.value})} required autoComplete="off" />
               <Input label="Nome Completo" placeholder="Administrador Master" value={form.name} onChange={e=>setForm({...form, name: e.target.value})} required />
               <Input label="Email" type="email" placeholder="admin@plataforma.com" value={form.email} onChange={e=>setForm({...form, email: e.target.value})} required />
               <Input label="Senha (mínimo 8 caracteres)" type="password" placeholder="••••••••" value={form.password} onChange={e=>setForm({...form, password: e.target.value})} required />

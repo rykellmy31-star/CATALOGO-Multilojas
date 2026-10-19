@@ -10,6 +10,7 @@ import publicRoutes from './routes/public.js';
 import uploadRoutes from './routes/upload.js';
 
 type Bindings = {
+  ASSETS?: Fetcher;
   DB: D1Database; STORAGE: R2Bucket; STORAGE_PUBLIC: R2Bucket;
   JWT_SECRET: string; SUPER_ADMIN_SETUP_TOKEN?: string;
   OPENAI_API_KEY?: string; AI_PROVIDER?: string; AI_ENABLED?: string;
@@ -45,6 +46,10 @@ app.route('/api/store', storeRoutes);
 app.route('/api/public', publicRoutes);
 app.route('/api/upload', uploadRoutes);
 app.route('/api', uploadRoutes);
+app.get('*', c => {
+  if (!c.req.path.startsWith('/api/') && c.env.ASSETS) return c.env.ASSETS.fetch(c.req.raw);
+  return c.json({ error: 'Rota não encontrada' }, 404);
+});
 app.notFound(c => c.json({ error: 'Rota não encontrada' }, 404));
 app.onError((err, c) => {
   console.error('Unhandled error:', err);
@@ -58,4 +63,5 @@ export async function scheduled(_event: ScheduledEvent, env: Bindings, _ctx: Exe
     console.error('Scheduled maintenance failed', error);
   }
 }
-export default app;
+export { app };
+export default { fetch: app.fetch, scheduled };

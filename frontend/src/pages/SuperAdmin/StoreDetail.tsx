@@ -143,7 +143,7 @@ export default function StoreDetail() {
             <form onSubmit={handleCreateAdmin} className="bg-gray-50 rounded-xl p-4 mb-4 space-y-3">
               <Input placeholder="Nome" value={newAdmin.name} onChange={e=>setNewAdmin({...newAdmin, name: e.target.value})} required />
               <Input type="email" placeholder="Email" value={newAdmin.email} onChange={e=>setNewAdmin({...newAdmin, email: e.target.value})} required />
-              <Input type="password" placeholder="Senha (mín. 6)" value={newAdmin.password} onChange={e=>setNewAdmin({...newAdmin, password: e.target.value})} required />
+              <Input type="password" placeholder="Senha (mín. 8)" value={newAdmin.password} onChange={e=>setNewAdmin({...newAdmin, password: e.target.value})} required />
               <div className="flex gap-2">
                 <Button type="submit" size="sm">Criar</Button>
                 <Button type="button" variant="outline" size="sm" onClick={()=>setShowAdminForm(false)}>Cancelar</Button>

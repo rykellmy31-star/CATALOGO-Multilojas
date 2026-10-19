@@ -1,7 +1,7 @@
 import { createRequire } from 'node:module';
 const { DatabaseSync } = createRequire(import.meta.url)('node:sqlite');
 import { readFileSync, readdirSync } from 'node:fs';
-import app from '../backend/src/index';
+import { app } from '../backend/src/index';
 import { signToken } from '../backend/src/utils/jwt';
 
 export function fixture() {

@@ -676,7 +676,8 @@ store.get('/export/csv', async (c) => {
   for (const p of rows as any[]) {
     const row = headers.map(h => {
       const val = (p as any)[h] ?? '';
-      const escaped = String(val).replace(/"/g, '""');
+      const safe = /^[=+@\-\t\r]/.test(String(val)) ? `'${val}` : String(val);
+      const escaped = safe.replace(/"/g, '""');
       return `"${escaped}"`;
     }).join(',');
     csv += row + '\n';

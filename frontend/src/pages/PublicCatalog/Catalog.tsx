@@ -20,7 +20,13 @@ export default function Catalog() {
   const [sort, setSort] = useState('newest');
   const [priceRange, setPriceRange] = useState({ min: '', max: '' });
   const [showFilters, setShowFilters] = useState(false);
-  const [interestList, setInterestList] = useState<string[]>(() => JSON.parse(localStorage.getItem('interestList') || '[]'));
+  const [interestList, setInterestList] = useState<string[]>([]);
+
+  const [interestProducts, setInterestProducts] = useState<any[]>([]);
+  useEffect(() => {
+    try { const saved = JSON.parse(localStorage.getItem(`interestList:${slug}`) || '[]'); setInterestProducts(Array.isArray(saved) ? saved : []); setInterestList(Array.isArray(saved) ? saved.map(p => p.id) : []); } catch { setInterestList([]); setInterestProducts([]); }
+    setStore(null);
+  }, [slug]);
 
   const fetchStore = async () => {
     try {
@@ -73,21 +79,23 @@ export default function Catalog() {
   const toggleInterest = (productId: string) => {
     const updated = interestList.includes(productId) ? interestList.filter(id=>id!==productId) : [...interestList, productId];
     setInterestList(updated);
-    localStorage.setItem('interestList', JSON.stringify(updated));
+    const selected = updated.includes(productId) ? [...interestProducts, products.find(p=>p.id===productId)].filter(Boolean) : interestProducts.filter(p=>p.id!==productId);
+    setInterestProducts(selected);
+    localStorage.setItem(`interestList:${slug}`, JSON.stringify(selected));
   };
 
   const sendInterestList = () => {
     if (!store || interestList.length === 0) return;
     const wa = store.whatsapp?.replace(/\D/g,'');
     if (!wa) return;
-    let msg = `Olá! Tenho interesse nos seguintes produtos da ${store.name}:%0A%0A`;
-    products.filter(p=>interestList.includes(p.id)).forEach(p=>{
-      msg += `• ${p.name} - ${formatPrice(p.price)} - ${window.location.origin}/loja/${slug}/produto/${p.slug}%0A`;
+    let msg = `Olá! Tenho interesse nos seguintes produtos da ${store.name}:\n\n`;
+    interestProducts.forEach(p=>{
+      msg += `• ${p.name} - ${formatPrice(p.price)} - ${window.location.origin}/loja/${slug}/produto/${p.slug}\n`;
     });
-    msg += `%0A%0AGostaria de mais informações!`;
+    msg += `\n\nGostaria de mais informações!`;
     // Analytics
     api.post(`/public/stores/${slug}/analytics`, { event_type: 'interest_list', metadata: { count: interestList.length } }).catch(()=>{});
-    window.open(`https://wa.me/${wa}?text=${msg}`, '_blank');
+    window.open(`https://wa.me/${wa}?text=${encodeURIComponent(msg)}`, '_blank');
   };
 
   if (!store && !loading) {
@@ -230,7 +238,7 @@ export default function Catalog() {
             <p className="text-xs text-slate-300">Envie todos de uma vez no WhatsApp</p>
           </div>
           <div className="flex gap-2">
-            <button onClick={()=>{setInterestList([]); localStorage.removeItem('interestList');}} className="p-2 rounded-xl bg-white/10 hover:bg-white/20">
+            <button onClick={()=>{setInterestList([]); setInterestProducts([]); localStorage.removeItem(`interestList:${slug}`);}} className="p-2 rounded-xl bg-white/10 hover:bg-white/20">
               <X className="w-4 h-4" />
             </button>
             <button onClick={sendInterestList} className="px-4 py-2 rounded-xl bg-green-500 hover:bg-green-600 text-white font-semibold text-sm">
