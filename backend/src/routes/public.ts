@@ -9,6 +9,7 @@ type Env = {
 };
 
 const publicRoutes = new Hono<Env>();
+const effectivePrice = 'CASE WHEN p.promotional_price IS NOT NULL AND p.promotional_price < p.price THEN p.promotional_price ELSE p.price END';
 
 // GET /api/public/stores/:slug - dados públicos da loja
 publicRoutes.get('/stores/:slug', async (c) => {
@@ -68,6 +69,10 @@ publicRoutes.get('/stores/:slug/products', async (c) => {
   const brand = c.req.query('brand');
   const minPrice = c.req.query('minPrice');
   const maxPrice = c.req.query('maxPrice');
+  const parsePrice = (value: string | undefined) => value === undefined ? undefined : value.trim() ? Number(value) : NaN;
+  const min = parsePrice(minPrice);
+  const max = parsePrice(maxPrice);
+  if ([min, max].some(value => value !== undefined && (!Number.isFinite(value) || value < 0)) || (min !== undefined && max !== undefined && min > max)) return c.json({ error: 'Intervalo de preços inválido' }, 400);
   const sort = c.req.query('sort') || 'newest'; // newest, price_asc, price_desc, name
   const page = Math.max(1, Number.parseInt(c.req.query('page') || '1') || 1);
   const limit = Math.min(50, Math.max(1, Number.parseInt(c.req.query('limit') || '12') || 12));
@@ -98,18 +103,18 @@ publicRoutes.get('/stores/:slug/products', async (c) => {
     params.push(brand, store.id);
   }
   if (minPrice) {
-    query += ' AND p.price >= ?';
-    params.push(parseFloat(minPrice));
+    query += ` AND ${effectivePrice} >= ?`;
+    params.push(min);
   }
   if (maxPrice) {
-    query += ' AND p.price <= ?';
-    params.push(parseFloat(maxPrice));
+    query += ` AND ${effectivePrice} <= ?`;
+    params.push(max);
   }
 
   // Ordenação
   switch (sort) {
-    case 'price_asc': query += ' ORDER BY p.price ASC'; break;
-    case 'price_desc': query += ' ORDER BY p.price DESC'; break;
+    case 'price_asc': query += ` ORDER BY ${effectivePrice} ASC, p.id ASC`; break;
+    case 'price_desc': query += ` ORDER BY ${effectivePrice} DESC, p.id ASC`; break;
     case 'name': query += ' ORDER BY p.name ASC'; break;
     default: query += ' ORDER BY p.created_at DESC';
   }
@@ -127,8 +132,8 @@ publicRoutes.get('/stores/:slug/products', async (c) => {
     countParams.push(`%${q}%`, `%${q}%`, `%${q}%`, `%${q}%`);
   }
   if (category) { countQuery += ' AND c.slug = ?'; countParams.push(category); }
-  if (minPrice) { countQuery += ' AND p.price >= ?'; countParams.push(parseFloat(minPrice)); }
-  if (maxPrice) { countQuery += ' AND p.price <= ?'; countParams.push(parseFloat(maxPrice)); }
+  if (minPrice) { countQuery += ` AND ${effectivePrice} >= ?`; countParams.push(min); }
+  if (maxPrice) { countQuery += ` AND ${effectivePrice} <= ?`; countParams.push(max); }
 
   if (brand) { countQuery += ' AND p.brand_id = (SELECT id FROM brands WHERE slug = ? AND store_id = ? LIMIT 1)'; countParams.push(brand, store.id); }
   const total = await c.env.DB.prepare(countQuery).bind(...countParams).first() as any;
@@ -176,7 +181,8 @@ publicRoutes.get('/stores/:slug/products/:productSlug', async (c) => {
 
   // WhatsApp link helper
   const whatsappNumber = store.whatsapp ? store.whatsapp.replace(/\D/g, '') : '';
-  const whatsappMessage = `Olá! Tenho interesse no produto: ${product.name} (Código: ${product.sku || product.id.slice(0,8)}) - Preço: R$ ${Number(product.price).toFixed(2)} - Link: /loja/${slug}/produto/${product.slug}`;
+  const displayPrice = product.promotional_price != null && product.promotional_price < product.price ? product.promotional_price : product.price;
+  const whatsappMessage = `Olá! Tenho interesse no produto: ${product.name} (Código: ${product.sku || product.id.slice(0,8)}) - Preço: R$ ${Number(displayPrice).toFixed(2)} - Link: /loja/${slug}/produto/${product.slug}`;
 
   return c.json({
     product,

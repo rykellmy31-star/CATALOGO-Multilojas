@@ -1,3 +1,4 @@
+import { getDisplayPrice } from '../../lib/pricing';
 import { useEffect, useState } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import api, { formatPrice, getImageUrl } from '../../lib/api';
@@ -46,8 +47,8 @@ export default function ProductDetail() {
 
   const product = data.product;
   const images: any[] = data.images || [];
-  const hasPromo = product.promotional_price && product.promotional_price < product.price;
-  const displayPrice = hasPromo ? product.promotional_price : product.price;
+  const displayPrice = getDisplayPrice(product);
+  const hasPromo = displayPrice < product.price;
 
   const whatsappNumber = data.store.whatsapp ? data.store.whatsapp.replace(/\D/g,'') : '';
 

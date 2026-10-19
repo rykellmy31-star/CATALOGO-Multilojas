@@ -40,21 +40,26 @@ export const createStoreSchema = z.object({
   status: z.enum(['active', 'suspended', 'pending']).optional()
 });
 
+const nonNegativeAmount = z.preprocess(
+  value => (typeof value === 'number' || (typeof value === 'string' && value.trim())) ? value : undefined,
+  z.coerce.number().finite().min(0, 'Valor não pode ser negativo')
+);
+
 export const createProductSchema = z.object({
   sku: z.string().optional(),
   name: z.string().min(2, 'Nome obrigatório'),
   slug: z.string().optional(),
   short_description: z.string().optional(),
   description: z.string().optional(),
-  price: z.coerce.number().min(0, 'Preço inválido'),
-  original_price: z.coerce.number().optional().nullable(),
-  promotional_price: z.coerce.number().optional().nullable(),
+  price: nonNegativeAmount,
+  original_price: nonNegativeAmount.optional().nullable(),
+  promotional_price: nonNegativeAmount.optional().nullable(),
   category_id: z.string().optional().nullable(),
   brand_id: z.string().optional().nullable(),
   status: z.enum(['draft', 'published', 'archived', 'out_of_stock']).default('draft'),
-  is_featured: z.coerce.boolean().optional().default(false),
-  is_on_sale: z.coerce.boolean().optional().default(false),
-  stock_quantity: z.coerce.number().optional().default(0),
+  is_featured: z.boolean().optional().default(false),
+  is_on_sale: z.boolean().optional().default(false),
+  stock_quantity: z.coerce.number().finite().int().min(0).optional().default(0),
   dimensions: z.string().optional().nullable(),
   technical_specs: z.string().optional().nullable(),
   variations: z.string().optional().nullable(),
@@ -83,7 +88,7 @@ export const createBannerSchema = z.object({
   link_url: publicLinkSchema.optional(),
   button_text: z.string().optional(),
   position: z.enum(['hero', 'secondary', 'footer', 'popup']).default('hero'),
-  is_active: z.coerce.boolean().optional().default(true),
+  is_active: z.boolean().optional().default(true),
   sort_order: z.coerce.number().optional()
 });
 

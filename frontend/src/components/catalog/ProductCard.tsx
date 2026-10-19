@@ -1,10 +1,11 @@
+import { getDisplayPrice } from '../../lib/pricing';
 import { Link } from 'react-router-dom';
 import { formatPrice, getImageUrl } from '../../lib/api';
 import { Heart, Eye } from 'lucide-react';
 
 export function ProductCard({ product, storeSlug, variant='default' }: { product: any; storeSlug: string; variant?: string }) {
-  const hasPromo = product.promotional_price && product.promotional_price < product.price;
-  const displayPrice = hasPromo ? product.promotional_price : product.price;
+  const displayPrice = getDisplayPrice(product);
+  const hasPromo = displayPrice < product.price;
   const originalPrice = hasPromo ? product.price : product.original_price;
 
   return (

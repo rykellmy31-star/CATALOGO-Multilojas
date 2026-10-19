@@ -1,3 +1,4 @@
+import { getDisplayPrice } from '../../lib/pricing';
 import { useEffect, useState } from 'react';
 import { useParams, useSearchParams, Link } from 'react-router-dom';
 import api, { formatPrice, getImageUrl } from '../../lib/api';
@@ -90,7 +91,7 @@ export default function Catalog() {
     if (!wa) return;
     let msg = `Olá! Tenho interesse nos seguintes produtos da ${store.name}:\n\n`;
     interestProducts.forEach(p=>{
-      msg += `• ${p.name} - ${formatPrice(p.price)} - ${window.location.origin}/loja/${slug}/produto/${p.slug}\n`;
+      msg += `• ${p.name} - ${formatPrice(getDisplayPrice(p))} - ${window.location.origin}/loja/${slug}/produto/${p.slug}\n`;
     });
     msg += `\n\nGostaria de mais informações!`;
     // Analytics
