@@ -10,7 +10,7 @@ Corrigidos: leitura do dashboard no formato D1, validação tipada Hono, respost
 
 Adicionadas proteções no banco contra referências entre lojas e mudança do proprietário dos recursos. A manutenção agendada foi ligada ao export do Worker. O Worker usa o binding de assets para servir o frontend e mantém as rotas da API.
 
-No frontend: retirados acessos demonstrativos e token de exemplo, corrigido redirecionamento após setup, link para catálogo da loja autenticada, edição de fotos e preço zero; adicionada prévia de produto. A lista de interesse passou a ser separada por loja e preserva itens entre páginas.
+No frontend: retirados acessos demonstrativos e token de exemplo, corrigido redirecionamento após setup, link para catálogo da loja autenticada, edição de fotos e preço zero; adicionada prévia de produto. O nome da loja fica visível no cabeçalho móvel; placeholders e favicon são locais, sem depender de serviço de imagens externo. A lista de interesse passou a ser separada por loja e preserva itens entre páginas.
 
 Dependências de build, testes, roteamento e CSS atualizadas; dependências sem uso removidas. O fluxo de CI passa a incluir auditoria de dependências, testes, build, migrações D1 locais e empacotamento sem publicação.
 

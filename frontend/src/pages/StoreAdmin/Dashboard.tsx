@@ -86,7 +86,7 @@ export default function StoreDashboard() {
           <div className="space-y-3">
             {data?.topProducts?.length ? data.topProducts.map((p: any) => (
               <Link key={p.id} to={`/admin/produtos/${p.id}/editar`} className="flex items-center gap-3 p-3 rounded-xl border hover:bg-gray-50 transition-colors">
-                <img src={p.image || 'https://via.placeholder.com/40'} alt={p.name} className="w-10 h-10 rounded-lg object-cover" />
+                <img src={p.image || '/sem-imagem.svg'} alt={p.name} className="w-10 h-10 rounded-lg object-cover" />
                 <div className="flex-1 min-w-0">
                   <p className="font-medium text-gray-900 text-sm truncate">{p.name}</p>
                   <p className="text-xs text-gray-500">{p.views || 0} views • {p.clicks || 0} cliques</p>

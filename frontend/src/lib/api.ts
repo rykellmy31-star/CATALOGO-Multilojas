@@ -45,7 +45,7 @@ export const formatDate = (date: string) =>
   new Date(date).toLocaleDateString('pt-BR', { day: '2-digit', month: 'short', year: 'numeric' });
 
 export const getImageUrl = (url: string | null | undefined) => {
-  if (!url) return 'https://via.placeholder.com/400x400?text=Sem+Imagem';
+  if (!url) return '/sem-imagem.svg';
   if (url.startsWith('data:') || url.startsWith('http') || url.startsWith('/api')) return url;
   return url;
 };

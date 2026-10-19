@@ -66,6 +66,7 @@ try {
   await page.goto(`${base}/loja/${store.slug}`);
   await page.getByRole('heading', { name: 'Produto de Teste' }).waitFor();
   await page.setViewportSize({ width: 390, height: 844 });
+  assert(await page.locator('header').getByText(store.name, { exact: true }).isVisible(), 'Nome da loja ausente no celular');
   await page.screenshot({ path: 'test-results/catalogo-mobile.png', fullPage: true });
   assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), 'Catálogo com rolagem horizontal no celular');
   await page.getByRole('heading', { name: 'Produto de Teste' }).click();

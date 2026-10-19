@@ -276,7 +276,7 @@ export default function ProductForm() {
             <div className="space-y-4">
               <Input label="Nome do Produto *" placeholder="Ex: Sofá Retrátil 2,30m Premium" value={form.name} onChange={e=>setForm({...form, name: e.target.value})} required />
               <div className="grid grid-cols-2 gap-4">
-                <Input label="SKU / Código" placeholder="SOF-RETR-001" value={form.sku} onChange={e=>setForm({...form, sku: e.target.value})} hint="Deixe vazio para gerar automaticamente" />
+                <Input label="SKU / Código" placeholder="SOF-RETR-001" value={form.sku} onChange={e=>setForm({...form, sku: e.target.value})} hint="Opcional: use um código interno" />
                 <Select label="Status" value={form.status} onChange={e=>setForm({...form, status: e.target.value})}>
                   <option value="draft">Rascunho</option>
                   <option value="published">Publicado</option>
@@ -368,7 +368,7 @@ export default function ProductForm() {
               {uploading ? <span className="text-sm text-gray-500">Enviando...</span> : <><Upload className="w-6 h-6 text-gray-400" /><span className="text-sm font-medium text-gray-600 mt-1">Enviar imagens</span><span className="text-xs text-gray-400">JPG, PNG, WEBP até 10MB</span></>}
               <input type="file" accept="image/*" multiple className="hidden" onChange={handleImageUpload} disabled={uploading} />
             </label>
-            <p className="text-xs text-gray-500 mt-2">A primeira imagem será a capa. Arraste para reordenar (em breve).</p>
+            <p className="text-xs text-gray-500 mt-2">A primeira imagem será a capa. Salve para aplicar as alterações.</p>
           </Card>
 
           <Button type="submit" loading={loading} className="w-full" size="lg">
