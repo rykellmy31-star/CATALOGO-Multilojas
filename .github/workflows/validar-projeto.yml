@@ -17,14 +17,8 @@ jobs:
           test -f package.json || { echo "::error::Código-fonte ainda não importado"; exit 1; }
           test -f package-lock.json || { echo "::error::Lockfile ausente"; exit 1; }
           test -f backend/src/routes/auth.ts || { echo "::error::API de autenticação ausente"; exit 1; }
-      - name: Bloquear segredo de desenvolvimento
-        shell: bash
-        run: |
-          set -euo pipefail
-          if grep -R -n -F 'setup-dev-token-change-me' backend/src; then
-            echo "::error::Token padrão inseguro detectado"
-            exit 1
-          fi
+      - name: Auditar segurança básica
+        run: python3 scripts/auditar-seguranca.py
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
