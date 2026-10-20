@@ -146,6 +146,39 @@ describe('Edição transacional de produtos e imagens', () => {
     expect(result).toMatchObject({ is_ai_generated: 0, ai_style: null });
   });
 
+  it('não reutiliza classificação IA vinculada a outro produto da mesma loja', async () => {
+    seed();
+    const generated = 'https://example.com/ia-so-do-segundo-produto.png';
+    f!.db.prepare(`
+      INSERT INTO products (id, store_id, name, slug, price)
+      VALUES ('pc', 'a', 'Outro produto', 'outro-produto', 150)
+    `).run();
+    f!.db.prepare(`
+      INSERT INTO ai_generations
+        (id, store_id, user_id, product_id, type, status, generated_image_url, ai_style)
+      VALUES ('gen-for-pc', 'a', 'ua', 'pc', 'image', 'completed', ?, 'modern_room')
+    `).run(generated);
+    const response = await update({ images: [generated] });
+    expect(response.status).toBe(200);
+    expect(f!.db.prepare(
+      'SELECT is_ai_generated, ai_style FROM product_images WHERE product_id = ? AND url = ?'
+    ).get('pa', generated)).toMatchObject({ is_ai_generated: 0, ai_style: null });
+  });
+
+  it('leitura de fotos ignora linha com store_id incompatível com a loja do produto', async () => {
+    seed();
+    // Referência legada/corrompida: product_id pertence a A, mas imagem marcada B.
+    f!.db.prepare(`
+      INSERT INTO product_images (id, product_id, store_id, url)
+      VALUES ('wrong-tenant-image', 'pa', 'b', 'https://example.com/private-b.png')
+    `).run();
+    const response = await f!.request('/api/store/products/pa', 'GET');
+    expect(response.status).toBe(200);
+    const { images } = await response.json() as any;
+    expect(images.map((x: any) => x.id)).not.toContain('wrong-tenant-image');
+    expect(images.every((x: any) => x.store_id === 'a')).toBe(true);
+  });
+
   it('não classifica uma geração pendente como foto IA aprovada na edição', async () => {
     seed();
     const url = 'https://example.com/geracao-pendente.png';
