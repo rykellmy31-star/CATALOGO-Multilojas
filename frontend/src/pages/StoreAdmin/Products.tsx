@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import api, { formatPrice } from '../../lib/api';
 import { Card, Badge, Button, Input } from '../../components/ui/Button';
@@ -12,17 +12,39 @@ export default function Products() {
   const [q, setQ] = useState('');
   const [status, setStatus] = useState('all');
   const [pagination, setPagination] = useState<any>({ page: 1, total: 0, pages: 1 });
+  const productsController = useRef<AbortController | null>(null);
 
   const fetchProducts = async (page=1) => {
+    // Evita que uma resposta antiga substitua uma busca mais recente.
+    productsController.current?.abort();
+    const controller = new AbortController();
+    productsController.current = controller;
     setLoading(true);
     try {
-      const { data } = await api.get('/store/products', { params: { q, status, page, limit: 20 } });
+      const { data } = await api.get('/store/products', {
+        params: { q, status, page, limit: 20 },
+        signal: controller.signal
+      });
+      if (controller.signal.aborted) return;
       setProducts(data.products || []);
       setPagination(data.pagination || { page, total: 0, pages: 1 });
-    } catch {} finally { setLoading(false); }
+    } catch {
+      if (!controller.signal.aborted) toast.error('Não foi possível carregar os produtos');
+    } finally {
+      if (productsController.current === controller) {
+        productsController.current = null;
+        setLoading(false);
+      }
+    }
   };
 
-  useEffect(()=>{ fetchProducts(1); }, [q, status]);
+  useEffect(() => {
+    fetchProducts(1);
+    return () => {
+      productsController.current?.abort();
+      productsController.current = null;
+    };
+  }, [q, status]);
 
   const handleDuplicate = async (id: string) => {
     try { await api.post(`/store/products/${id}/duplicate`); toast.success('Produto duplicado!'); fetchProducts(); } catch { toast.error('Erro ao duplicar'); }
