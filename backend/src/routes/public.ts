@@ -233,7 +233,7 @@ publicRoutes.get('/search', async (c) => {
     FROM products p
     JOIN stores s ON p.store_id = s.id
     LEFT JOIN product_images pi ON pi.product_id = p.id AND pi.is_primary = 1
-    WHERE p.status = 'published' AND s.status = 'active' AND (p.name LIKE ? ESCAPE '\' OR p.description LIKE ? ESCAPE '\')
+    WHERE p.status = 'published' AND s.status = 'active' AND (p.name LIKE ? ESCAPE '\\' OR p.description LIKE ? ESCAPE '\\')
     ORDER BY p.views DESC LIMIT 10
   `).bind(escapePublicLike(q), escapePublicLike(q)).all();
 
