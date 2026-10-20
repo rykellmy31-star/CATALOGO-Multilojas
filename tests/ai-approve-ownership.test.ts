@@ -26,8 +26,40 @@ describe('Aprovação segura de imagens IA sem chamadas ao provedor', () => {
     expect(response.status).toBe(200);
     expect(countImages()).toBe(1);
     const row = f!.db.prepare('SELECT * FROM product_images LIMIT 1').get() as any;
-    expect(row).toMatchObject({ product_id: 'pa', store_id: 'a', url: image, ai_style: 'premium_catalog', is_ai_generated: 1 });
+    expect(row).toMatchObject({
+      product_id: 'pa', store_id: 'a', url: image,
+      ai_style: 'premium_catalog', is_ai_generated: 1,
+      is_primary: 1, sort_order: 0
+    });
   });
+  it('preserva a capa atual quando aprova mais uma imagem IA', async () => {
+    setup();
+    f!.db.prepare(`
+      INSERT INTO product_images (id, product_id, store_id, url, is_primary, sort_order)
+      VALUES ('cover', 'pa', 'a', 'https://example.com/cover.jpg', 1, 0)
+    `).run();
+    const response = await approve({ generation_id: 'gen1', product_id: 'pa', image_url: image });
+    expect(response.status).toBe(200);
+    const rows = f!.db.prepare(
+      'SELECT url, is_primary, sort_order FROM product_images WHERE product_id = ? ORDER BY sort_order'
+    ).all('pa');
+    expect(rows).toEqual([
+      { url: 'https://example.com/cover.jpg', is_primary: 1, sort_order: 0 },
+      { url: image, is_primary: 0, sort_order: 1 }
+    ]);
+  });
+
+  it('recusa aprovação que repetiria uma imagem já cadastrada manualmente', async () => {
+    setup();
+    f!.db.prepare(`
+      INSERT INTO product_images (id, product_id, store_id, url, is_primary, sort_order)
+      VALUES ('manual-copy', 'pa', 'a', ?, 1, 0)
+    `).run(image);
+    const response = await approve({ generation_id: 'gen1', product_id: 'pa', image_url: image });
+    expect(response.status).toBe(409);
+    expect(countImages()).toBe(1);
+  });
+
   it('impede repetir aprovação da mesma geração', async () => {
     setup();
     const body = { generation_id: 'gen1', product_id: 'pa', image_url: image };
