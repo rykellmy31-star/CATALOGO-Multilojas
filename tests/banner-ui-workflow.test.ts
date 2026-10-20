@@ -45,6 +45,19 @@ describe('Painel de banners: programação e segurança', () => {
     expect(page).toContain('is_active: !banner.is_active');
   });
 
+  it('distingue banners agendados, ativos e expirados no painel', () => {
+    expect(page).toContain('const bannerStatus = (banner: any) =>');
+    expect(page).toContain("return 'Agendado'");
+    expect(page).toContain("return 'Encerrado'");
+    expect(page).toContain("return 'Em exibição'");
+    expect(page).toContain('bannerStatus(b)');
+  });
+
+  it('interpreta data legada sem offset como UTC antes de exibir', () => {
+    expect(page).toContain("value.replace(' ', 'T') + 'Z'");
+    expect(page).toContain('toLocaleString(\'pt-BR\')');
+  });
+
   it('exibe mensagens do backend ao cadastrar ou alternar uma campanha', () => {
     expect(page).toContain('error?.response?.data?.error');
     expect(page).toContain('O término deve ser posterior ao início');
