@@ -13,6 +13,10 @@ export default function Banners() {
   const uploadController = useRef<AbortController | null>(null);
   const createInFlight = useRef(false);
   const togglesInFlight = useRef(new Set<string>());
+  const [editingScheduleId, setEditingScheduleId] = useState<string | null>(null);
+  const [editingSchedule, setEditingSchedule] = useState({ starts_at: '', ends_at: '' });
+  const [savingSchedule, setSavingSchedule] = useState(false);
+  const savingScheduleRef = useRef(false);
   const fetch = async () => { try { const { data } = await api.get('/store/banners'); setBanners(data.banners || []); } catch {} };
   useEffect(() => {
     fetch();
@@ -96,6 +100,57 @@ export default function Banners() {
     if (begins !== undefined && begins > now) return 'Agendado';
     if (expires !== undefined && expires <= now) return 'Encerrado';
     return 'Em exibição';
+  };
+
+  const toLocalInput = (value: string | null | undefined) => {
+    const date = bannerTimestamp(value);
+    if (!date) return '';
+    const pad = (number: number) => String(number).padStart(2, '0');
+    return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+  };
+  const startEditingSchedule = (banner: any) => {
+    if (savingScheduleRef.current) return;
+    setEditingScheduleId(banner.id);
+    setEditingSchedule({
+      starts_at: toLocalInput(banner.starts_at),
+      ends_at: toLocalInput(banner.ends_at)
+    });
+  };
+  const handleSaveSchedule = async (event: React.FormEvent, id: string) => {
+    event.preventDefault();
+    if (savingScheduleRef.current) return;
+    const parse = (value: string) => {
+      if (!value) return null;
+      const date = new Date(value);
+      if (!Number.isFinite(date.getTime())) throw new Error('Data inválida');
+      return date.toISOString();
+    };
+    let startsAt: string | null;
+    let endsAt: string | null;
+    try {
+      startsAt = parse(editingSchedule.starts_at);
+      endsAt = parse(editingSchedule.ends_at);
+    } catch {
+      return toast.error('Confira as datas do agendamento');
+    }
+    if (startsAt && endsAt && Date.parse(startsAt) >= Date.parse(endsAt)) {
+      return toast.error('O término deve ser posterior ao início');
+    }
+    savingScheduleRef.current = true;
+    setSavingSchedule(true);
+    try {
+      await api.put(`/store/banners/${id}`, {
+        starts_at: startsAt, ends_at: endsAt
+      });
+      setEditingScheduleId(null);
+      toast.success('Agendamento atualizado!');
+      await fetch();
+    } catch (error: any) {
+      toast.error(error?.response?.data?.error || 'Não foi possível alterar o agendamento');
+    } finally {
+      savingScheduleRef.current = false;
+      setSavingSchedule(false);
+    }
   };
 
   const handleDelete = async (id: string) => {
@@ -206,12 +261,48 @@ export default function Banners() {
                 </div>
                 <div className="flex items-center gap-3">
                   <span>{b.button_text || 'Sem botão'} → {b.link_url || '-'}</span>
+                  <button type="button" onClick={() => startEditingSchedule(b)}
+                    disabled={savingSchedule} className="rounded-xl border px-3 py-1.5 hover:bg-gray-50">
+                    Alterar datas
+                  </button>
                   <button type="button" onClick={() => handleToggleActive(b)}
                     className="rounded-xl border px-3 py-1.5 hover:bg-gray-50">
                     {b.is_active ? 'Desativar' : 'Ativar'}
                   </button>
                 </div>
               </div>
+              {editingScheduleId === b.id && (
+                <form onSubmit={event => handleSaveSchedule(event, b.id)}
+                  className="border-t p-4 space-y-3">
+                  <h4 className="text-sm font-semibold text-gray-900">Alterar programação</h4>
+                  <div className="grid sm:grid-cols-2 gap-3">
+                    <label className="text-xs font-medium text-gray-600">
+                      Início (opcional)
+                      <input type="datetime-local" value={editingSchedule.starts_at}
+                        disabled={savingSchedule}
+                        onChange={event => setEditingSchedule(previous => ({
+                          ...previous, starts_at: event.target.value
+                        }))} className="mt-1 w-full rounded-xl border p-2" />
+                    </label>
+                    <label className="text-xs font-medium text-gray-600">
+                      Fim (opcional)
+                      <input type="datetime-local" value={editingSchedule.ends_at}
+                        disabled={savingSchedule} min={editingSchedule.starts_at || undefined}
+                        onChange={event => setEditingSchedule(previous => ({
+                          ...previous, ends_at: event.target.value
+                        }))} className="mt-1 w-full rounded-xl border p-2" />
+                    </label>
+                  </div>
+                  <p className="text-xs text-gray-500">Apague as datas para exibir sem limite de tempo.</p>
+                  <div className="flex gap-2">
+                    <Button type="submit" disabled={savingSchedule} loading={savingSchedule}>
+                      Salvar datas
+                    </Button>
+                    <Button type="button" variant="outline" disabled={savingSchedule}
+                      onClick={() => setEditingScheduleId(null)}>Cancelar</Button>
+                  </div>
+                </form>
+              )}
             </Card>
           ))
         }
