@@ -22,7 +22,7 @@ describe('API real',()=>{
   });
   it('JSON malformado e produto inválido retornam 400',async()=>{
     f=fixture();expect((await f.request('/api/store/products','POST',{name:'',price:-1})).status).toBe(400);
-    expect((await f.request('/api/store/products?page=-1&limit=nope')).status).toBe(200);
+    expect((await f.request('/api/store/products?page=-1&limit=nope')).status).toBe(400);
   });
   it('hash real tem salt e rejeita senha incorreta',async()=>{
     f=fixture();
