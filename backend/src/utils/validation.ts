@@ -98,6 +98,9 @@ export const aiGenerateSchema = z.object({
   style: z.enum(['modern_room', 'white_background', 'promotional', 'premium_catalog']).default('modern_room'),
   generate_description: z.boolean().optional().default(true),
   generate_image: z.boolean().optional().default(true)
+}).refine(value => value.generate_description || value.generate_image, {
+  path: ['generate_image'],
+  message: 'Selecione descrição e/ou imagem'
 });
 
 export const storeAdminSchema = z.object({
