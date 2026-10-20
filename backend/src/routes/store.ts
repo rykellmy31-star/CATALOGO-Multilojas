@@ -642,15 +642,27 @@ store.get('/settings', async (c) => {
 
 store.put('/settings', async (c) => {
   const storeId = getStoreId(c);
-  const data = await c.req.json() as any;
-  if (['logo_url', 'banner_url'].some(field =>
-    data[field] !== undefined && !isOwnedStorageImageUrl(data[field], storeId))) {
-    return c.json({ error: 'Imagem não pertence à loja' }, 400);
+  const data = await c.req.json().catch(() => null);
+  if (!data || typeof data !== 'object' || Array.isArray(data)) {
+    return c.json({ error: 'Configurações inválidas' }, 400);
+  }
+  // O formulário envia o registro inteiro, incluindo logo_url/banner_url
+  // nulos enquanto não há imagem. NULL também permite limpar a marca.
+  for (const field of ['logo_url', 'banner_url'] as const) {
+    const value = data[field];
+    if (value !== undefined && value !== null && value !== '' &&
+        !isOwnedStorageImageUrl(value, storeId)) {
+      return c.json({ error: 'Imagem não pertence à loja' }, 400);
+    }
   }
   const user = c.get('user');
 
   for (const field of ['logo_url', 'banner_url', 'website', 'facebook']) {
-    if (data[field] && !publicLinkSchema.safeParse(data[field]).success) return c.json({ error: `URL inválida: ${field}` }, 400);
+    const value = data[field];
+    if (value !== undefined && value !== null && value !== '' &&
+        !publicLinkSchema.safeParse(value).success) {
+      return c.json({ error: `URL inválida: ${field}` }, 400);
+    }
   }
   const allowed = ['name','description','logo_url','banner_url','primary_color','secondary_color','accent_color','address','city','state','zip_code','phone','whatsapp','email','instagram','facebook','website','opening_hours','seo_title','seo_description','seo_keywords'];
   const updates: string[] = [];
@@ -661,15 +673,31 @@ store.put('/settings', async (c) => {
       params.push(data[key]);
     }
   }
-  if (data.slug) {
+  if (data.slug !== undefined && data.slug !== null && data.slug !== '') {
+    if (typeof data.slug !== 'string') return c.json({ error: 'Endereço da loja inválido' }, 400);
+    const slug = slugify(data.slug);
+    if (!slug) return c.json({ error: 'Endereço da loja inválido' }, 400);
+    const occupied = await c.env.DB.prepare(
+      'SELECT id FROM stores WHERE slug = ? AND id != ?'
+    ).bind(slug, storeId).first();
+    if (occupied) return c.json({ error: 'Endereço já utilizado por outra loja' }, 409);
     updates.push('slug = ?');
-    params.push(slugify(data.slug));
+    params.push(slug);
   }
   if (updates.length === 0) return c.json({ error: 'Nenhum campo para atualizar' }, 400);
   updates.push("updated_at = datetime('now')");
   params.push(storeId);
 
-  await c.env.DB.prepare(`UPDATE stores SET ${updates.join(', ')} WHERE id = ?`).bind(...params).run();
+  try {
+    await c.env.DB.prepare(`UPDATE stores SET ${updates.join(', ')} WHERE id = ?`)
+      .bind(...params).run();
+  } catch (error) {
+    // UNIQUE continua bloqueando corridas simultâneas entre lojas.
+    if (String(error).toLowerCase().includes('unique constraint failed: stores.slug')) {
+      return c.json({ error: 'Endereço já utilizado por outra loja' }, 409);
+    }
+    throw error;
+  }
 
   await c.env.DB.prepare(
     'INSERT INTO audit_logs (user_id, store_id, action, entity_type, entity_id, details) VALUES (?, ?, ?, ?, ?, ?)'
