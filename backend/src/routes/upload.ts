@@ -65,6 +65,7 @@ upload.post('/', async (c) => {
   const productId = formData.get('productId') as string | null;
 
   if (!file || typeof file === 'string') return c.json({ error: 'Nenhum arquivo enviado' }, 400);
+  if (file.size === 0) return c.json({ error: 'Arquivo vazio não pode ser enviado' }, 400);
 
   const allowed = ['image/jpeg', 'image/png', 'image/webp', 'image/jpg', 'image/gif'];
   if (!allowed.includes(file.type)) {
