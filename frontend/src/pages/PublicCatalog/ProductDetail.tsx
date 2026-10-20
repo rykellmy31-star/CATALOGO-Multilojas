@@ -8,29 +8,58 @@ import { ArrowLeft, Heart, Share2, MessageCircle, Eye, Package, Truck, Shield, S
 
 export default function ProductDetail() {
   const { slug, productSlug } = useParams();
-  const [data, setData] = useState<any>(null);
-  const [loading, setLoading] = useState(true);
+  // A URL faz parte do estado: nunca renderizar dados do produto anterior.
+  const routeKey = JSON.stringify([slug, productSlug]);
+  const [request, setRequest] = useState<{
+    key: string; status: 'loading' | 'ready' | 'error'; data: any;
+  } | null>(null);
+  const data = request?.key === routeKey && request.status === 'ready' ? request.data : null;
+  const loading = request?.key !== routeKey || request.status === 'loading';
   const [selectedImage, setSelectedImage] = useState(0);
   const [showShare, setShowShare] = useState(false);
+  const [shareError, setShareError] = useState(false);
 
   useEffect(() => {
-    api.get(`/public/stores/${slug}/products/${productSlug}`).then(r=>setData(r.data)).catch(()=>{}).finally(()=>setLoading(false));
-  }, [slug, productSlug]);
+    let active = true;
+    const controller = new AbortController();
+    setRequest({ key: routeKey, status: 'loading', data: null });
+    setSelectedImage(0);
+    setShowShare(false);
+    setShareError(false);
+    api.get(`/public/stores/${slug}/products/${productSlug}`, { signal: controller.signal })
+      .then(r => {
+        if (active) setRequest({ key: routeKey, status: 'ready', data: r.data });
+      })
+      .catch(() => {
+        if (active) setRequest({ key: routeKey, status: 'error', data: null });
+      });
+    return () => { active = false; controller.abort(); };
+  }, [routeKey, slug, productSlug]);
 
   const handleWhatsApp = () => {
     if (!data?.whatsappLink) return;
     api.post(`/public/stores/${slug}/analytics`, { event_type: 'whatsapp_click', product_id: data.product.id }).catch(()=>{});
-    window.open(data.whatsappLink, '_blank');
+    window.open(data.whatsappLink, '_blank', 'noopener,noreferrer');
   };
 
   const handleShare = async () => {
+    if (!data?.product) return;
     const url = window.location.href;
-    if (navigator.share) {
-      try { await navigator.share({ title: data.product.name, url }); } catch {}
-    } else {
-      navigator.clipboard.writeText(url);
-      setShowShare(true);
-      setTimeout(()=>setShowShare(false), 2000);
+    setShowShare(false);
+    setShareError(false);
+    try {
+      if (navigator.share) {
+        await navigator.share({ title: data.product.name, url });
+      } else {
+        if (!navigator.clipboard?.writeText) throw new Error('Clipboard indisponível');
+        await navigator.clipboard.writeText(url);
+        setShowShare(true);
+        setTimeout(() => setShowShare(false), 2000);
+      }
+    } catch {
+      // Não registrar compartilhamento cancelado ou cópia que falhou.
+      if (!navigator.share) setShareError(true);
+      return;
     }
     api.post(`/public/stores/${slug}/analytics`, { event_type: 'share_click', product_id: data.product.id }).catch(()=>{});
   };
@@ -131,14 +160,16 @@ export default function ProductDetail() {
             )}
 
             <div className="flex flex-col sm:flex-row gap-3">
-              <button onClick={handleWhatsApp} className="flex-1 inline-flex items-center justify-center gap-2 px-8 py-4 rounded-2xl font-bold text-white shadow-lg hover:shadow-xl transition-all" style={{ background: '#25D366' }}>
-                <MessageCircle className="w-5 h-5" /> Tenho Interesse • WhatsApp
+              <button onClick={handleWhatsApp} disabled={!data.whatsappLink} className="flex-1 inline-flex items-center justify-center gap-2 px-8 py-4 rounded-2xl font-bold text-white shadow-lg hover:shadow-xl transition-all disabled:opacity-50 disabled:cursor-not-allowed" style={{ background: '#25D366' }}>
+                <MessageCircle className="w-5 h-5" /> {data.whatsappLink ? 'Tenho Interesse • WhatsApp' : 'WhatsApp indisponível'}
               </button>
               <button onClick={handleShare} className="inline-flex items-center justify-center gap-2 px-6 py-4 rounded-2xl border bg-white hover:bg-gray-50 font-medium">
                 <Share2 className="w-5 h-5" /> Compartilhar
               </button>
             </div>
-            {showShare && <div className="bg-green-50 border border-green-200 text-green-700 text-sm rounded-xl px-4 py-2">Link copiado para a área de transferência!</div>}
+            {!data.whatsappLink && <p className="text-sm text-gray-600">Esta loja ainda não cadastrou um WhatsApp para contato.</p>}
+            {showShare && <div role="status" className="bg-green-50 border border-green-200 text-green-700 text-sm rounded-xl px-4 py-2">Link copiado para a área de transferência!</div>}
+            {shareError && <div role="alert" className="bg-amber-50 border border-amber-200 text-amber-800 text-sm rounded-xl px-4 py-2">Não foi possível copiar o link. Copie o endereço na barra do navegador.</div>}
 
             <div className="grid grid-cols-3 gap-3 text-center">
               <div className="bg-white rounded-xl border p-3">
