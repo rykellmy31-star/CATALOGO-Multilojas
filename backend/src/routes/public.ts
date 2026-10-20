@@ -189,7 +189,7 @@ publicRoutes.get('/stores/:slug/products/:productSlug', async (c) => {
   // O link compartilhado precisa conter a URL completa do catálogo e preço
   // atualizado deve ser consultado no site, não fixado em uma mensagem antiga.
   const whatsappNumber = typeof store.whatsapp === 'string' ? store.whatsapp.replace(/\D/g, '') : '';
-  const validWhatsApp = /^[1-9]\d{9,14}$/.test(whatsappNumber);
+  const validWhatsApp = typeof store.whatsapp === 'string' && /^[\d+().\-\s]+$/.test(store.whatsapp) && /^[1-9]\d{9,14}$/.test(whatsappNumber);
   const productUrl = new URL(
     `/loja/${encodeURIComponent(store.slug)}/produto/${encodeURIComponent(product.slug)}`,
     new URL(c.req.url).origin
