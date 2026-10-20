@@ -75,6 +75,9 @@ publicRoutes.get('/stores/:slug', async (c) => {
     await recordUniquePublicView(c.env.DB, 'catalog_view', store.id, null, sessionId, c.env.JWT_SECRET).catch(() => {});
   }
 
+  // A programação usa o relógio atual. Evitar respostas cacheadas após
+  // o início ou término de uma campanha e após mudanças no catálogo.
+  c.header('Cache-Control', 'no-store');
   return c.json({
     store,
     banners: (banners as any).results || banners,
