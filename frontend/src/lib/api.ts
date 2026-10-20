@@ -7,7 +7,11 @@ const api = axios.create({
 
 api.interceptors.request.use((config) => {
   const token = localStorage.getItem('token');
-  if (token) config.headers.Authorization = `Bearer ${token}`;
+  // Não sobrescreve credenciais explícitas (ex.: logout da sessão anterior).
+  const explicitAuth = config.headers.Authorization !== undefined
+    || config.headers.authorization !== undefined
+    || (typeof config.headers.has === 'function' && config.headers.has('Authorization'));
+  if (token && !explicitAuth) config.headers.Authorization = `Bearer ${token}`;
   
   // Session ID para analytics
   let sessionId = localStorage.getItem('sessionId');
@@ -23,7 +27,17 @@ api.interceptors.request.use((config) => {
 api.interceptors.response.use(
   (res) => res,
   (error) => {
-    if (error.response?.status === 401) {
+    const authorization = error.config?.headers?.get?.('Authorization')
+      ?? error.config?.headers?.Authorization
+      ?? error.config?.headers?.authorization;
+    const requestToken = typeof authorization === 'string'
+      ? /^Bearer\s+(.+)$/i.exec(authorization.trim())?.[1]
+      : undefined;
+    const currentToken = localStorage.getItem('token');
+    const requestUrl = error.config?.url || '';
+    const isLoginRequest = /(?:^|\/)auth\/(?:login|setup-super-admin)(?:[?#]|$)/.test(requestUrl);
+    // Um 401 antigo, anônimo ou de credenciais inválidas não pode derrubar a sessão atual.
+    if (error.response?.status === 401 && currentToken && requestToken === currentToken && !isLoginRequest) {
       localStorage.removeItem('token');
       localStorage.removeItem('user');
       // Não redireciona se já estiver em login/setup
