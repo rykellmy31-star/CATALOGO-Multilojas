@@ -127,8 +127,8 @@ export default function StoreDetail() {
   };
 
   const handleResetPassword = async (adminId: string) => {
-    const pwd = prompt('Nova senha (mín. 6 caracteres):');
-    if (!pwd || pwd.length < 6) return;
+    const pwd = prompt('Nova senha (mín. 8 caracteres):');
+    if (!pwd || pwd.length < 8) return;
     try { await api.put(`/superadmin/stores/${id}/admins/${adminId}/reset-password`, { password: pwd }); toast.success('Senha redefinida!'); } catch { toast.error('Erro'); }
   };
 
