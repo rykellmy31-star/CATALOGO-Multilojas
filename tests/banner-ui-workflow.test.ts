@@ -58,6 +58,30 @@ describe('Painel de banners: programação e segurança', () => {
     expect(page).toContain('toLocaleString(\'pt-BR\')');
   });
 
+  it('permite editar o período sem recriar nem excluir o banner', () => {
+    expect(page).toContain("const [editingScheduleId, setEditingScheduleId]");
+    expect(page).toContain('startEditingSchedule(b)');
+    expect(page).toContain("handleSaveSchedule(event, b.id)");
+    expect(page).toContain("await api.put(`/store/banners/${id}`, {");
+    expect(page).toContain('starts_at: startsAt, ends_at: endsAt');
+    expect(page).toContain('Agendamento atualizado!');
+  });
+
+  it('converte datas existentes para o horário local ao reabrir o formulário', () => {
+    expect(page).toContain('const toLocalInput = (value: string | null | undefined)');
+    expect(page).toContain('date.getFullYear()');
+    expect(page).toContain('date.getHours()');
+    expect(page).toContain('date.getMinutes()');
+  });
+
+  it('permite limpar ambos os limites e bloqueia envio repetido', () => {
+    expect(page).toContain('if (!value) return null');
+    expect(page).toContain('if (savingScheduleRef.current) return');
+    expect(page).toContain('savingScheduleRef.current = true');
+    expect(page).toContain('savingScheduleRef.current = false');
+    expect(page).toContain('disabled={savingSchedule}');
+  });
+
   it('exibe mensagens do backend ao cadastrar ou alternar uma campanha', () => {
     expect(page).toContain('error?.response?.data?.error');
     expect(page).toContain('O término deve ser posterior ao início');
