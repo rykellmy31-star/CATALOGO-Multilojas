@@ -1,4 +1,5 @@
 import { getDisplayPrice } from '../../lib/pricing';
+import { buildProductContactUrl } from '../../lib/productContact';
 import { useEffect, useState } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import api, { formatPrice, getImageUrl } from '../../lib/api';
@@ -36,10 +37,12 @@ export default function ProductDetail() {
     return () => { active = false; controller.abort(); };
   }, [routeKey, slug, productSlug]);
 
-  const handleWhatsApp = () => {
-    if (!data?.whatsappLink) return;
-    api.post(`/public/stores/${slug}/analytics`, { event_type: 'whatsapp_click', product_id: data.product.id }).catch(()=>{});
-    window.open(data.whatsappLink, '_blank', 'noopener,noreferrer');
+  const trackWhatsAppClick = () => {
+    // O próprio link abre o WhatsApp no gesto do cliente, sem bloqueio de popup.
+    if (!data?.product) return;
+    api.post(`/public/stores/${slug}/analytics`, {
+      event_type: 'whatsapp_click', product_id: data.product.id
+    }).catch(() => {});
   };
 
   const handleShare = async () => {
@@ -79,7 +82,9 @@ export default function ProductDetail() {
   const displayPrice = getDisplayPrice(product);
   const hasPromo = displayPrice < product.price;
 
-  const whatsappNumber = data.store.whatsapp ? data.store.whatsapp.replace(/\D/g,'') : '';
+  const contactUrl = buildProductContactUrl(
+    data.store?.whatsapp, product.name, slug, product.slug, window.location.origin
+  );
 
   return (
     <PublicLayout store={data.store}>
@@ -160,14 +165,23 @@ export default function ProductDetail() {
             )}
 
             <div className="flex flex-col sm:flex-row gap-3">
-              <button onClick={handleWhatsApp} disabled={!data.whatsappLink} className="flex-1 inline-flex items-center justify-center gap-2 px-8 py-4 rounded-2xl font-bold text-white shadow-lg hover:shadow-xl transition-all disabled:opacity-50 disabled:cursor-not-allowed" style={{ background: '#25D366' }}>
-                <MessageCircle className="w-5 h-5" /> {data.whatsappLink ? 'Tenho Interesse • WhatsApp' : 'WhatsApp indisponível'}
-              </button>
+              {contactUrl ? (
+                <a href={contactUrl} target="_blank" rel="noopener noreferrer" onClick={trackWhatsAppClick}
+                  className="flex-1 inline-flex items-center justify-center gap-2 px-8 py-4 rounded-2xl font-bold text-white shadow-lg hover:shadow-xl transition-all"
+                  style={{ background: '#25D366' }}>
+                  <MessageCircle className="w-5 h-5" /> Tenho Interesse • WhatsApp
+                </a>
+              ) : (
+                <button type="button" disabled className="flex-1 inline-flex items-center justify-center gap-2 px-8 py-4 rounded-2xl font-bold text-white opacity-50 cursor-not-allowed"
+                  style={{ background: '#25D366' }}>
+                  <MessageCircle className="w-5 h-5" /> WhatsApp indisponível
+                </button>
+              )}
               <button onClick={handleShare} className="inline-flex items-center justify-center gap-2 px-6 py-4 rounded-2xl border bg-white hover:bg-gray-50 font-medium">
                 <Share2 className="w-5 h-5" /> Compartilhar
               </button>
             </div>
-            {!data.whatsappLink && <p className="text-sm text-gray-600">Esta loja ainda não cadastrou um WhatsApp para contato.</p>}
+            {!contactUrl && <p className="text-sm text-gray-600">Esta loja ainda não cadastrou um WhatsApp válido para contato.</p>}
             {showShare && <div role="status" className="bg-green-50 border border-green-200 text-green-700 text-sm rounded-xl px-4 py-2">Link copiado para a área de transferência!</div>}
             {shareError && <div role="alert" className="bg-amber-50 border border-amber-200 text-amber-800 text-sm rounded-xl px-4 py-2">Não foi possível copiar o link. Copie o endereço na barra do navegador.</div>}
 
