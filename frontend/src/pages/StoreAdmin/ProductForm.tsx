@@ -28,6 +28,7 @@ export default function ProductForm() {
   const [aiImage, setAiImage] = useState<string | null>(null);
   const [aiStyle, setAiStyle] = useState('modern_room');
   const [aiLoading, setAiLoading] = useState(false);
+  const [applyingAI, setApplyingAI] = useState(false);
   const [aiResult, setAiResult] = useState<any>(null);
   const [aiError, setAiError] = useState('');
 
@@ -117,19 +118,36 @@ export default function ProductForm() {
     } finally { setAiLoading(false); }
   };
 
-  const applyAIResult = () => {
-    if (!aiResult) return;
-    setForm((prev:any) => ({
-      ...prev,
-      name: aiResult.name || prev.name,
-      short_description: aiResult.shortDescription || prev.short_description,
-      description: aiResult.description || prev.description,
-    }));
-    if (aiResult.imageUrl) {
-      setImages(prev => [...prev, aiResult.imageUrl]);
+  const applyAIResult = async () => {
+    if (!aiResult || applyingAI) return;
+    setApplyingAI(true);
+    try {
+      if (aiResult.imageUrl) {
+        if (isEdit && id && aiResult.id) {
+          // Só imagens de gerações verificadas podem receber a marcação de IA.
+          await api.post('/store/ai/approve-image', {
+            product_id: id, image_url: aiResult.imageUrl, generation_id: aiResult.id
+          });
+          const { data } = await api.get(`/store/products/${id}`);
+          setExistingImages(data.images || []);
+        } else {
+          // No primeiro cadastro, a URL privada só será publicada ao salvar o produto.
+          setImages(prev => [...new Set([...prev, aiResult.imageUrl])]);
+        }
+      }
+      setForm((prev:any) => ({
+        ...prev,
+        name: aiResult.name || prev.name,
+        short_description: aiResult.shortDescription || prev.short_description,
+        description: aiResult.description || prev.description,
+      }));
+      toast.success('Informações da IA aplicadas!');
+      setShowAI(false);
+    } catch (error: any) {
+      toast.error(error?.response?.data?.error || 'Não foi possível aprovar a imagem de IA');
+    } finally {
+      setApplyingAI(false);
     }
-    toast.success('Informações da IA aplicadas!');
-    setShowAI(false);
   };
 
   const removeImage = (idx: number, isExisting=false) => {
@@ -229,9 +247,9 @@ export default function ProductForm() {
                 </div>
 
                 <div className="bg-white rounded-xl border p-3 text-xs">
-                  <p className="font-medium text-gray-700">💰 Custo estimado</p>
-                  <p className="text-gray-500 mt-1">Descrição: ~$0.01 • Imagem: ~$0.04 • <span className="font-semibold text-gray-700">Total: ~$0.05 por produto</span></p>
-                  <p className="text-gray-400 mt-1">Limite da sua loja: ver painel Super Admin</p>
+                  <p className="font-medium text-gray-700">Uso da IA e cobrança</p>
+                  <p className="text-gray-500 mt-1">A geração utiliza uma API paga quando acionada. O custo varia conforme o modelo, a imagem e o uso; nenhum valor fixo é garantido.</p>
+                  <p className="text-gray-400 mt-1">Consulte limites da sua loja e custos do provedor antes de gerar.</p>
                 </div>
 
                 <Button onClick={handleGenerateAI} loading={aiLoading} disabled={!aiImage} className="w-full" size="lg">
@@ -259,7 +277,7 @@ export default function ProductForm() {
                       {aiResult.imageUrl && <p className="text-xs text-gray-500">🖼️ Imagem ilustrativa — original preservada</p>}
                     </div>
                     <div className="flex gap-2">
-                      <Button onClick={applyAIResult} size="sm" className="flex-1"><Check className="w-4 h-4 mr-1" /> Aplicar no Produto</Button>
+                      <Button onClick={applyAIResult} loading={applyingAI} disabled={applyingAI} size="sm" className="flex-1"><Check className="w-4 h-4 mr-1" /> Aplicar no Produto</Button>
                       <Button variant="outline" size="sm" onClick={handleGenerateAI}>Gerar Novamente</Button>
                     </div>
                   </div>
