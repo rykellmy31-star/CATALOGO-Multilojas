@@ -833,12 +833,15 @@ store.post('/ai/generate', zValidator('json', aiGenerateSchema), async (c) => {
         console.error('Falha ao limpar imagem IA ou devolver cota');
       }
     }
-    // Respostas de provedores podem conter informação interna: não retornar ao cliente.
-    const reason = String(error?.message || 'Falha na IA').slice(0, 500);
+    // O histórico é lido pelo administrador da loja. Nunca persistir
+    // mensagens brutas do provedor (podem conter chaves, URLs ou prompts).
+    const publicReason = error instanceof StorageQuotaExceededError
+      ? 'Limite de armazenamento da loja atingido'
+      : 'Geração não concluída. Verifique sua configuração ou tente mais tarde.';
     await c.env.DB.prepare("UPDATE ai_generations SET status = 'failed', error_message = ? WHERE id = ? AND store_id = ?")
-      .bind(reason, generationId, storeId).run().catch(() => {});
+      .bind(publicReason, generationId, storeId).run().catch(() => {});
     if (error instanceof StorageQuotaExceededError) {
-      return c.json({ error: 'Limite de armazenamento da loja atingido' }, 413);
+      return c.json({ error: publicReason }, 413);
     }
     return c.json({ error: 'Não foi possível concluir a geração com IA' }, 500);
   }
