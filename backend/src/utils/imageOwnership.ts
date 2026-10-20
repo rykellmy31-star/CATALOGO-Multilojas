@@ -6,9 +6,23 @@ const FILE_NAME = /^[a-z0-9_-]{1,128}\.(?:jpe?g|png|webp|gif)$/i;
 const SEGMENT = /^[a-z0-9_-]{1,128}$/i;
 
 export function isOwnedStorageImageUrl(url: string, storeId: string): boolean {
-  if (typeof url !== 'string' || !SEGMENT.test(storeId)) return false;
+  if (typeof url !== 'string' || !SEGMENT.test(storeId) || !url ||
+      url.length > 4096 || /[\\\u0000-\u0020\u007f]/.test(url)) return false;
   const prefix = '/api/storage/';
-  if (!url.startsWith(prefix)) return true;
+
+  if (!url.startsWith(prefix)) {
+    // Imagens externas http(s) continuam funcionando, mas um endereço
+    // absoluto para /api/storage não pode contornar a verificação da loja.
+    if (url.startsWith('//') || url.startsWith('/')) return false;
+    let external: URL;
+    try { external = new URL(url); }
+    catch { return false; }
+    if (!['https:', 'http:'].includes(external.protocol) ||
+        external.username || external.password ||
+        external.pathname === '/api/storage' ||
+        external.pathname.startsWith(prefix)) return false;
+    return true;
+  }
 
   const encodedKey = url.slice(prefix.length);
   let key: string;
