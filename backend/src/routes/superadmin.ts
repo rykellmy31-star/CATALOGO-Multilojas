@@ -79,34 +79,51 @@ superadmin.get('/stores', async (c) => {
 
 // POST /api/superadmin/stores
 superadmin.post('/stores', zValidator('json', createStoreSchema), async (c) => {
-  const data = c.req.valid('json') as any;
+  const data = c.req.valid('json');
   const user = c.get('user');
-
-  let slug = data.slug ? slugify(data.slug) : slugify(data.name);
-  
-  // Verifica slug único
-  const existing = await c.env.DB.prepare('SELECT id FROM stores WHERE slug = ?').bind(slug).first();
-  if (existing) {
-    slug = `${slug}-${Date.now().toString(36).slice(-4)}`;
-  }
+  const explicitSlug = Boolean(data.slug?.trim());
+  const baseSlug = slugify(data.slug || data.name);
+  if (!baseSlug) return c.json({ error: 'Informe um endereço válido para a loja' }, 400);
 
   const storeId = crypto.randomUUID();
-  
-  await c.env.DB.prepare(`
-    INSERT INTO stores (id, name, slug, description, whatsapp, email, phone, address, city, state, primary_color, secondary_color, accent_color, plan, status)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  const insert = (slug: string) => c.env.DB.prepare(`
+    INSERT INTO stores (
+      id, name, slug, description, whatsapp, email, phone, address, city,
+      state, primary_color, secondary_color, accent_color, plan, status,
+      storage_limit_mb, ai_enabled, ai_daily_limit, ai_monthly_limit
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(slug) DO NOTHING
   `).bind(
     storeId, data.name, slug, data.description || null, data.whatsapp || null,
     data.email || null, data.phone || null, data.address || null, data.city || null,
-    data.state || null, data.primary_color || '#0ea5e9', data.secondary_color || '#0f172a',
-    data.accent_color || '#f59e0b', data.plan || 'free', data.status || 'active'
-  ).run();
+    data.state || null, data.primary_color || '#0ea5e9',
+    data.secondary_color || '#0f172a', data.accent_color || '#f59e0b',
+    data.plan || 'free', data.status || 'active',
+    data.storage_limit_mb ?? 1024, data.ai_enabled === false ? 0 : 1,
+    data.ai_daily_limit ?? 10, data.ai_monthly_limit ?? 100
+  );
+
+  const result = await insert(baseSlug);
+  let slug = baseSlug;
+  if (result.meta?.changes !== 1) {
+    if (explicitSlug) {
+      return c.json({ error: 'Endereço da loja já utilizado' }, 409);
+    }
+    // O UUID elimina colisões por timestamp e suporta cadastro simultâneo.
+    slug = `${baseSlug}-${storeId}`;
+    const retry = await insert(slug);
+    if (retry.meta?.changes !== 1) {
+      return c.json({ error: 'Não foi possível gerar endereço exclusivo' }, 409);
+    }
+  }
 
   await c.env.DB.prepare(
     'INSERT INTO audit_logs (user_id, store_id, action, entity_type, entity_id, details) VALUES (?, ?, ?, ?, ?, ?)'
-  ).bind(user.userId, storeId, 'create_store', 'store', storeId, JSON.stringify({ name: data.name, slug })).run().catch(()=>{});
+  ).bind(user.userId, storeId, 'create_store', 'store', storeId,
+    JSON.stringify({ name: data.name, slug })).run().catch(() => {});
 
-  const store = await c.env.DB.prepare('SELECT * FROM stores WHERE id = ?').bind(storeId).first();
+  const store = await c.env.DB.prepare('SELECT * FROM stores WHERE id = ?')
+    .bind(storeId).first();
   return c.json({ store, message: 'Loja criada com sucesso!' }, 201);
 });
 
@@ -161,9 +178,15 @@ superadmin.put('/stores/:id', zValidator('json', createStoreSchema.partial()), a
       params.push(typeof data[key] === 'boolean' ? Number(data[key]) : data[key]);
     }
   }
-  if (data.slug) {
+  if (data.slug !== undefined) {
+    const newSlug = slugify(data.slug);
+    if (!newSlug) return c.json({ error: 'Endereço inválido para a loja' }, 400);
+    const taken = await c.env.DB.prepare(
+      'SELECT id FROM stores WHERE slug = ? AND id != ?'
+    ).bind(newSlug, id).first();
+    if (taken) return c.json({ error: 'Endereço da loja já utilizado' }, 409);
     updates.push('slug = ?');
-    params.push(slugify(data.slug));
+    params.push(newSlug);
   }
   
   if (updates.length === 0) return c.json({ error: 'Nenhum campo para atualizar' }, 400);
@@ -171,7 +194,16 @@ superadmin.put('/stores/:id', zValidator('json', createStoreSchema.partial()), a
   updates.push("updated_at = datetime('now')");
   params.push(id);
 
-  await c.env.DB.prepare(`UPDATE stores SET ${updates.join(', ')} WHERE id = ?`).bind(...params).run();
+  try {
+    await c.env.DB.prepare(`UPDATE stores SET ${updates.join(', ')} WHERE id = ?`)
+      .bind(...params).run();
+  } catch (error) {
+    // Protege também a corrida entre a consulta de slug e o UPDATE.
+    if (String(error).toLowerCase().includes('unique constraint failed: stores.slug')) {
+      return c.json({ error: 'Endereço da loja já utilizado' }, 409);
+    }
+    throw error;
+  }
 
   await c.env.DB.prepare(
     'INSERT INTO audit_logs (user_id, store_id, action, entity_type, entity_id, details) VALUES (?, ?, ?, ?, ?, ?)'
