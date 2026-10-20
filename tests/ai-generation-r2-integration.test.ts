@@ -36,14 +36,15 @@ function setup(override?: { failSave?: boolean; missingInput?: boolean }) {
   mocks.edit.mockResolvedValue({ imageBase64: output, model: 'gpt-image-2.5-flare', cost: 0 });
   return calls;
 }
-function run() {
+function run(request_id?: string) {
   const key = 'stores/a/products/pa/input.png';
   return f!.request('/api/store/ai/generate', 'POST', {
     image_url: '/api/storage/' + encodeURIComponent(key),
     product_id: 'pa',
     generate_description: false,
     generate_image: true,
-    style: 'modern_room'
+    style: 'modern_room',
+    ...(request_id ? { request_id } : {})
   });
 }
 describe('Integração local IA -> R2 -> histórico sem chamadas pagas', () => {
@@ -60,6 +61,61 @@ describe('Integração local IA -> R2 -> histórico sem chamadas pagas', () => {
     const history = f!.db.prepare('SELECT generated_image_url, status FROM ai_generations LIMIT 1').get() as any;
     expect(history).toMatchObject({ generated_image_url: response.generation.imageUrl, status: 'completed' });
   });
+  it('reenvio com mesmo UUID não aciona provedor, R2 ou nova geração', async () => {
+    const calls = setup();
+    const requestId = crypto.randomUUID();
+    expect((await run(requestId)).status).toBe(200);
+    const duplicate = await run(requestId);
+    expect(duplicate.status).toBe(409);
+    expect(mocks.edit).toHaveBeenCalledTimes(1);
+    expect(calls.put).toHaveLength(1);
+    expect((f!.db.prepare('SELECT COUNT(*) AS n FROM ai_generations').get() as any).n).toBe(1);
+  });
+
+  it('reenvio simultâneo não duplica edição nem reserva cota', async () => {
+    const calls = setup();
+    const requestId = crypto.randomUUID();
+    let entered!: () => void;
+    let release!: () => void;
+    const started = new Promise<void>(resolve => { entered = resolve; });
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    mocks.edit.mockImplementationOnce(async () => {
+      entered();
+      await gate;
+      return { imageBase64: output, model: 'gpt-image-2.5-flare', cost: 0 };
+    });
+    const first = run(requestId);
+    await started;
+    const duplicate = await run(requestId);
+    expect(duplicate.status).toBe(409);
+    expect(mocks.edit).toHaveBeenCalledTimes(1);
+    release();
+    expect((await first).status).toBe(200);
+    expect(calls.put).toHaveLength(1);
+  });
+
+  it('outro UUID pode gerar novamente somente dentro da cota', async () => {
+    setup();
+    f!.db.prepare('UPDATE stores SET ai_daily_limit = 2, ai_monthly_limit = 2 WHERE id = ?').run('a');
+    expect((await run(crypto.randomUUID())).status).toBe(200);
+    expect((await run(crypto.randomUUID())).status).toBe(200);
+    expect((await run(crypto.randomUUID())).status).toBe(429);
+    expect(mocks.edit).toHaveBeenCalledTimes(2);
+  });
+
+  it.each(['invalido', '', '00000000-0000-0000-0000-00000000000Z'])
+    ('recusa chave não-UUID sem chamar provedor: %s', async (invalid) => {
+      setup();
+      const key = 'stores/a/products/pa/input.png';
+      const result = await f!.request('/api/store/ai/generate', 'POST', {
+        image_url: '/api/storage/' + encodeURIComponent(key),
+        product_id: 'pa', generate_description: false, generate_image: true,
+        request_id: invalid
+      });
+      expect(result.status).toBe(400);
+      expect(mocks.edit).not.toHaveBeenCalled();
+    });
+
   it('retira imagem recém-enviada ao R2 se salvar histórico falhar', async () => {
     const calls = setup({ failSave: true });
     f!.db.exec(`CREATE TRIGGER fail_completed_ai BEFORE UPDATE ON ai_generations
