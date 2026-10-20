@@ -1,4 +1,6 @@
 import { Hono } from 'hono';
+import { bodyLimit } from 'hono/body-limit';
+import { parseAnalyticsEvent, parseAnalyticsSessionId, analyticsRateLimitKey, recordUniquePublicView, hashAnalyticsSessionId } from '../utils/analytics.js';
 import { parseCatalogPagination, parsePublicSearch, escapePublicLike } from '../utils/publicSearch.js';
 
 type Env = {
@@ -6,6 +8,7 @@ type Env = {
     DB: D1Database;
     STORAGE: R2Bucket;
     R2_PUBLIC_URL?: string;
+    JWT_SECRET: string;
   };
 };
 
@@ -48,10 +51,11 @@ publicRoutes.get('/stores/:slug', async (c) => {
     ORDER BY p.created_at DESC LIMIT 8
   `).bind(store.id).all();
 
-  // Registrar visita (fire and forget)
-  c.env.DB.prepare(
-    'INSERT INTO analytics_events (id, store_id, event_type, session_id, ip_hash) VALUES (?, ?, ?, ?, ?)'
-  ).bind(crypto.randomUUID(), store.id, 'catalog_view', c.req.header('X-Session-Id') || 'anon', 'hash').run().catch(()=>{});
+  // Apenas a rota GET registra visita; a sessão original nunca entra no banco.
+  const sessionId = parseAnalyticsSessionId(c.req.header('X-Session-Id'));
+  if (sessionId && sessionId !== 'anon') {
+    await recordUniquePublicView(c.env.DB, 'catalog_view', store.id, null, sessionId, c.env.JWT_SECRET).catch(() => {});
+  }
 
   return c.json({
     store,
@@ -176,12 +180,11 @@ publicRoutes.get('/stores/:slug/products/:productSlug', async (c) => {
     ORDER BY RANDOM() LIMIT 4
   `).bind(store.id, product.category_id, product.id).all();
 
-  // Incrementa views
-  await c.env.DB.prepare('UPDATE products SET views = views + 1 WHERE id = ?').bind(product.id).run().catch(()=>{});
-  
-  await c.env.DB.prepare(
-    'INSERT INTO analytics_events (id, store_id, product_id, event_type, session_id) VALUES (?, ?, ?, ?, ?)'
-  ).bind(crypto.randomUUID(), store.id, product.id, 'product_view', c.req.header('X-Session-Id') || 'anon').run().catch(()=>{});
+  // Deduplicação de produto em lote transacional: evento e contador juntos.
+  const sessionId = parseAnalyticsSessionId(c.req.header('X-Session-Id'));
+  if (sessionId && sessionId !== 'anon') {
+    await recordUniquePublicView(c.env.DB, 'product_view', store.id, product.id, sessionId, c.env.JWT_SECRET).catch(() => {});
+  }
 
   // WhatsApp link helper
   const whatsappNumber = store.whatsapp ? store.whatsapp.replace(/\D/g, '') : '';
@@ -197,27 +200,51 @@ publicRoutes.get('/stores/:slug/products/:productSlug', async (c) => {
   });
 });
 
-// POST /api/public/stores/:slug/analytics - registrar eventos
-publicRoutes.post('/stores/:slug/analytics', async (c) => {
+// POST /api/public/stores/:slug/analytics - registrar eventos (não visualizações)
+publicRoutes.post('/stores/:slug/analytics',
+  bodyLimit({ maxSize: 4096, onError: c => c.json({ error: 'Evento muito grande' }, 413) }),
+  async (c) => {
   const slug = c.req.param('slug');
-  const body = await c.req.json() as any;
-  const { event_type, product_id, metadata } = body;
+  const event = parseAnalyticsEvent(await c.req.json().catch(() => null));
+  if (!event) return c.json({ error: 'Evento inválido' }, 400);
+  const { event_type, product_id, metadataJson } = event;
+  const sessionId = parseAnalyticsSessionId(c.req.header('X-Session-Id'));
+  if (sessionId === null) return c.json({ error: 'Sessão inválida' }, 400);
 
-  const store = await c.env.DB.prepare('SELECT id FROM stores WHERE slug = ? AND status = \'active\'').bind(slug).first() as any;
+  const store = await c.env.DB.prepare("SELECT id FROM stores WHERE slug = ? AND status = 'active'").bind(slug).first() as any;
   if (!store) return c.json({ error: 'Loja não encontrada' }, 404);
+  if (!c.env.JWT_SECRET || c.env.JWT_SECRET.length < 32) return c.json({ error: 'Serviço indisponível' }, 503);
 
-  if (!['catalog_view','product_view','whatsapp_click','share_click','search','interest_list','banner_click'].includes(event_type)) return c.json({ error: 'Evento inválido' }, 400);
-  if (product_id && !await c.env.DB.prepare("SELECT id FROM products WHERE id = ? AND store_id = ? AND status = 'published'").bind(product_id, store.id).first()) return c.json({ error: 'Produto não encontrado' }, 404);
-
-  // Incrementa clicks se for whatsapp_click
-  if (event_type === 'whatsapp_click' && product_id) {
-    await c.env.DB.prepare('UPDATE products SET clicks = clicks + 1 WHERE id = ? AND store_id = ?').bind(product_id, store.id).run().catch(()=>{});
+  const key = await analyticsRateLimitKey(c.env.JWT_SECRET, c.req.header('CF-Connecting-IP') || 'local', store.id);
+  const now = Math.floor(Date.now() / 1000);
+  const limit = await c.env.DB.prepare(
+    'INSERT INTO auth_rate_limits (id, hits, expires_at) VALUES (?, 1, ?) ' +
+    'ON CONFLICT(id) DO UPDATE SET ' +
+    'hits = CASE WHEN expires_at <= ? THEN 1 ELSE hits + 1 END, ' +
+    'expires_at = CASE WHEN expires_at <= ? THEN excluded.expires_at ELSE expires_at END ' +
+    'RETURNING hits, expires_at'
+  ).bind(key, now + 60, now, now).first() as { hits: number; expires_at: number } | null;
+  if (!limit) return c.json({ error: 'Serviço indisponível' }, 503);
+  if (limit.hits > 120) {
+    c.header('Retry-After', String(Math.max(1, limit.expires_at - now)));
+    return c.json({ error: 'Muitos eventos. Tente novamente em instantes.' }, 429);
   }
+  if (product_id && !await c.env.DB.prepare(
+    "SELECT id FROM products WHERE id = ? AND store_id = ? AND status = 'published'"
+  ).bind(product_id, store.id).first()) return c.json({ error: 'Produto não encontrado' }, 404);
 
-  await c.env.DB.prepare(
+  const storedSessionId = await hashAnalyticsSessionId(c.env.JWT_SECRET, sessionId, store.id);
+  const insertEvent = c.env.DB.prepare(
     'INSERT INTO analytics_events (id, store_id, product_id, event_type, session_id, metadata) VALUES (?, ?, ?, ?, ?, ?)'
-  ).bind(crypto.randomUUID(), store.id, product_id || null, event_type, c.req.header('X-Session-Id') || 'anon', metadata ? JSON.stringify(metadata) : null).run().catch(()=>{});
+  ).bind(crypto.randomUUID(), store.id, product_id || null, event_type, storedSessionId, metadataJson);
 
+  if (event_type === 'whatsapp_click' && product_id) {
+    const increment = c.env.DB.prepare('UPDATE products SET clicks = clicks + 1 WHERE id = ? AND store_id = ?')
+      .bind(product_id, store.id);
+    await c.env.DB.batch([insertEvent, increment]);
+  } else {
+    await insertEvent.run();
+  }
   return c.json({ success: true });
 });
 
