@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
-import api, { getImageUrl } from '../../lib/api';
+import api from '../../lib/api';
+import AdminImage from '../../components/AdminImage';
 import { Card, Button, Input } from '../../components/ui/Button';
 import { Plus, Trash2, Image as ImageIcon } from 'lucide-react';
 import { toast } from 'sonner';
@@ -40,7 +41,7 @@ export default function Banners() {
           </div>
           <div>
             <label className="text-sm font-medium text-gray-700">Imagem (1200x500 recomendado)</label>
-            {form.image_url ? <div className="mt-2 relative"><img src={getImageUrl(form.image_url)} alt="" className="w-full h-32 object-cover rounded-xl border" /><button type="button" onClick={()=>setForm({...form, image_url:''})} className="absolute top-2 right-2 p-1 rounded-full bg-white shadow text-red-600">✕</button></div> : null}
+            {form.image_url ? <div className="mt-2 relative"><AdminImage url={form.image_url} alt="" className="w-full h-32 object-cover rounded-xl border" /><button type="button" onClick={()=>setForm({...form, image_url:''})} className="absolute top-2 right-2 p-1 rounded-full bg-white shadow text-red-600">✕</button></div> : null}
             <div className="mt-2 flex gap-2">
               <label className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border-2 border-dashed hover:bg-gray-50 cursor-pointer text-sm font-medium">
                 <ImageIcon className="w-4 h-4" /> Enviar imagem
@@ -61,7 +62,7 @@ export default function Banners() {
           banners.map(b=>(
             <Card key={b.id} className="overflow-hidden">
               <div className="relative h-40">
-                <img src={getImageUrl(b.image_url)} alt={b.title} className="w-full h-full object-cover" />
+                <AdminImage url={b.image_url} alt={b.title} className="w-full h-full object-cover" />
                 <div className="absolute inset-0 bg-gradient-to-r from-black/60 to-transparent flex items-center p-6">
                   <div className="text-white">
                     <h3 className="font-bold text-lg">{b.title || 'Sem título'}</h3>
