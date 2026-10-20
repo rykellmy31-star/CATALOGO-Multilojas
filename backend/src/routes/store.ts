@@ -234,7 +234,7 @@ store.post('/products', zValidator('json', createProductSchema), async (c) => {
     // Em uma corrida, o SKU pode ser ocupado após a verificação inicial.
     // D1.batch reverte produto e imagens, preservando a atomicidade.
     const reason = String(error);
-    if (data.sku && /UNIQUE constraint failed:\\s*products\\.store_id,\\s*products\\.sku/i.test(reason)) {
+    if (data.sku && reason.toLowerCase().includes('unique constraint failed: products.store_id, products.sku')) {
       return c.json({ error: 'SKU já utilizado nesta loja' }, 409);
     }
     throw error;
