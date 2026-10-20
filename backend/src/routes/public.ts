@@ -161,7 +161,7 @@ publicRoutes.get('/stores/:slug/products/:productSlug', async (c) => {
   if (!store) return c.json({ error: 'Loja não encontrada' }, 404);
 
   const product = await c.env.DB.prepare(`
-    SELECT p.id, p.store_id, p.sku, p.name, p.slug, p.short_description, p.description, p.price, p.original_price, p.promotional_price, p.category_id, p.brand_id, p.status, p.is_featured, p.is_on_sale, p.stock_quantity, p.dimensions, p.technical_specs, p.variations, c.name as category_name, c.slug as category_slug, b.name as brand_name
+    SELECT p.id, p.store_id, p.sku, p.name, p.slug, p.short_description, p.description, p.price, p.original_price, p.promotional_price, p.category_id, p.brand_id, p.status, p.is_featured, p.is_on_sale, p.stock_quantity, p.views, p.dimensions, p.technical_specs, p.variations, c.name as category_name, c.slug as category_slug, b.name as brand_name
     FROM products p
     LEFT JOIN categories c ON p.category_id = c.id
     LEFT JOIN brands b ON p.brand_id = b.id
