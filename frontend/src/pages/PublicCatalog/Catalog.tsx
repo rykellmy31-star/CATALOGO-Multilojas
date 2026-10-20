@@ -74,6 +74,39 @@ export default function Catalog() {
     return () => controller.abort();
   }, [slug]);
 
+  // Uma campanha pode começar ou terminar enquanto o visitante mantém
+  // o catálogo aberto. Atualiza apenas banners, sem repetir a visita/analytics.
+  useEffect(() => {
+    let controller: AbortController | null = null;
+    let lastRefresh = 0;
+    const refreshBanners = () => {
+      if (document.visibilityState !== 'visible') return;
+      if (Date.now() - lastRefresh < 5000) return;
+      lastRefresh = Date.now();
+      controller?.abort();
+      const current = new AbortController();
+      controller = current;
+      api.get(`/public/stores/${slug}/banners`, { signal: current.signal })
+        .then(({ data }) => {
+          if (!current.signal.aborted) setBanners(data.banners || []);
+        })
+        .catch((error) => {
+          if (!current.signal.aborted && error?.response?.status === 404) {
+            setBanners([]);
+          }
+        });
+    };
+    const interval = window.setInterval(refreshBanners, 60_000);
+    window.addEventListener('focus', refreshBanners);
+    document.addEventListener('visibilitychange', refreshBanners);
+    return () => {
+      window.clearInterval(interval);
+      window.removeEventListener('focus', refreshBanners);
+      document.removeEventListener('visibilitychange', refreshBanners);
+      controller?.abort();
+    };
+  }, [slug]);
+
   useEffect(() => {
     const controller = new AbortController();
     setLoading(true);
