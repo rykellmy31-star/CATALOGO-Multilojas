@@ -103,7 +103,7 @@ export default function Catalog() {
         });
     };
     const refreshOnFocus = () => refreshBanners();
-    let transitionTimer: ReturnType<typeof setTimeout> | undefined;
+    let transitionTimer: number | undefined;
     if (nextBannerTransitionAt) {
       const transitionTime = Date.parse(nextBannerTransitionAt);
       if (Number.isFinite(transitionTime)) {
