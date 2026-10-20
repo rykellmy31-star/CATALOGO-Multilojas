@@ -186,6 +186,7 @@ store.post('/products', zValidator('json', createProductSchema), async (c) => {
 
   const productId = crypto.randomUUID();
   const baseSlug = data.slug ? slugify(data.slug) : slugify(data.name);
+  if (!baseSlug) return c.json({ error: 'Nome ou endereço do produto não gera uma URL válida' }, 400);
   let slug = baseSlug;
 
   // O índice UNIQUE resolve conflitos de slug inclusive em gravações simultâneas.
@@ -289,8 +290,17 @@ store.put('/products/:id', zValidator('json', createProductSchema.partial()), as
   }
   if (data.is_featured !== undefined) { updates.push('is_featured = ?'); params.push(data.is_featured ? 1 : 0); }
   if (data.is_on_sale !== undefined) { updates.push('is_on_sale = ?'); params.push(data.is_on_sale ? 1 : 0); }
-  if (data.slug) { updates.push('slug = ?'); params.push(slugify(data.slug)); }
-  else if (data.name && data.name !== existing.name) { updates.push('slug = ?'); params.push(slugify(data.name)); }
+  if (data.slug) {
+    const slug = slugify(data.slug);
+    if (!slug) return c.json({ error: 'Endereço inválido para o produto' }, 400);
+    updates.push('slug = ?');
+    params.push(slug);
+  } else if (data.name && data.name !== existing.name) {
+    const slug = slugify(data.name);
+    if (!slug) return c.json({ error: 'Nome não gera um endereço válido' }, 400);
+    updates.push('slug = ?');
+    params.push(slug);
+  }
   
   if (data.status === 'published' && existing.status !== 'published') {
     updates.push("published_at = datetime('now')");
