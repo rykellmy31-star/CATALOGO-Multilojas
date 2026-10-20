@@ -16,8 +16,16 @@ export default function Catalog() {
   const [banners, setBanners] = useState<any[]>([]);
   const [pagination, setPagination] = useState<any>({ page: 1, pages: 1, total: 0 });
   const [loading, setLoading] = useState(true);
+  const [storeLoading, setStoreLoading] = useState(true);
+  const [loadedStoreSlug, setLoadedStoreSlug] = useState<string | undefined>();
+  const [loadedProductsKey, setLoadedProductsKey] = useState<string | null>(null);
   const [searchQ, setSearchQ] = useState(searchParams.get('q') || '');
   const [selectedCat, setSelectedCat] = useState(searchParams.get('categoria') || '');
+  // A URL é a fonte da verdade; respeita Voltar/Avançar no navegador.
+  useEffect(() => {
+    setSearchQ(searchParams.get('q') || '');
+    setSelectedCat(searchParams.get('categoria') || '');
+  }, [searchParams]);
   const [sort, setSort] = useState('newest');
   const [priceRange, setPriceRange] = useState({ min: '', max: '' });
   const [showFilters, setShowFilters] = useState(false);
@@ -34,54 +42,84 @@ export default function Catalog() {
     } catch { /* armazenamento indisponível */ }
     setInterestProducts(saved);
     setInterestList(saved.map(p => p.id));
-    setStore(null);
   }, [slug]);
 
-  const fetchStore = async () => {
-    try {
-      const { data } = await api.get(`/public/stores/${slug}`);
-      setStore(data.store);
-      setCategories(data.categories || []);
-      setBanners(data.banners || []);
-      setFeatured(data.featured || []);
-    } catch { /* not found */ }
-  };
+  // O conteúdo antigo jamais aparece durante mudanças de loja ou filtros.
+  const productsQueryKey = JSON.stringify([
+    slug, searchParams.toString(), sort, priceRange.min, priceRange.max
+  ]);
 
-  const fetchProducts = async () => {
+  useEffect(() => {
+    const controller = new AbortController();
+    setStoreLoading(true);
+    setStore(null);
+    setCategories([]);
+    setBanners([]);
+    setFeatured([]);
+    api.get(`/public/stores/${slug}`, { signal: controller.signal })
+      .then(({ data }) => {
+        if (controller.signal.aborted) return;
+        setStore(data.store || null);
+        setCategories(data.categories || []);
+        setBanners(data.banners || []);
+        setFeatured(data.featured || []);
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (!controller.signal.aborted) {
+          setLoadedStoreSlug(slug);
+          setStoreLoading(false);
+        }
+      });
+    return () => controller.abort();
+  }, [slug]);
+
+  useEffect(() => {
+    const controller = new AbortController();
     setLoading(true);
-    try {
-      const params: any = {
-        page: searchParams.get('page') || 1,
-        limit: 12,
-        sort,
-      };
-      if (searchParams.get('q')) params.q = searchParams.get('q');
-      if (searchParams.get('categoria') || selectedCat) params.category = searchParams.get('categoria') || selectedCat;
-      if (priceRange.min) params.minPrice = priceRange.min;
-      if (priceRange.max) params.maxPrice = priceRange.max;
+    setProducts([]);
+    setPagination({ page: 1, pages: 1, total: 0 });
+    const params: any = {
+      page: searchParams.get('page') || 1,
+      limit: 12,
+      sort,
+    };
+    if (searchParams.get('q')) params.q = searchParams.get('q');
+    if (searchParams.get('categoria')) params.category = searchParams.get('categoria');
+    if (priceRange.min) params.minPrice = priceRange.min;
+    if (priceRange.max) params.maxPrice = priceRange.max;
+    api.get(`/public/stores/${slug}/products`, { params, signal: controller.signal })
+      .then(({ data }) => {
+        if (controller.signal.aborted) return;
+        setProducts(data.products || []);
+        setPagination(data.pagination || { page: 1, pages: 1, total: 0 });
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (controller.signal.aborted) return;
+        setLoadedProductsKey(productsQueryKey);
+        setLoading(false);
+      });
+    return () => controller.abort();
+  }, [productsQueryKey]);
 
-      const { data } = await api.get(`/public/stores/${slug}/products`, { params });
-      setProducts(data.products || []);
-      setPagination(data.pagination || { page: 1, pages: 1, total: 0 });
-    } catch {} finally { setLoading(false); }
-  };
-
-  useEffect(()=>{ fetchStore(); }, [slug]);
-  useEffect(()=>{ fetchProducts(); }, [slug, searchParams, sort, priceRange, selectedCat]);
+  const productsLoading = loading || loadedProductsKey !== productsQueryKey;
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
-    const params: any = {};
-    if (searchQ) params.q = searchQ;
-    if (selectedCat) params.categoria = selectedCat;
+    const params = new URLSearchParams(searchParams);
+    params.delete('page');
+    const query = searchQ.trim();
+    if (query) params.set('q', query);
+    else params.delete('q');
     setSearchParams(params);
   };
 
   const handleCategory = (catSlug: string) => {
-    setSelectedCat(catSlug);
-    const params: any = {};
-    if (searchQ) params.q = searchQ;
-    if (catSlug) params.categoria = catSlug;
+    const params = new URLSearchParams(searchParams);
+    params.delete('page');
+    if (catSlug) params.set('categoria', catSlug);
+    else params.delete('categoria');
     setSearchParams(params);
   };
 
@@ -107,7 +145,10 @@ export default function Catalog() {
     }).catch(() => {});
   };
 
-  if (!store && !loading) {
+  if (storeLoading || loadedStoreSlug !== slug) {
+    return <div role="status" aria-label="Carregando catálogo" className="min-h-screen bg-white flex items-center justify-center"><div className="h-64 w-full max-w-2xl bg-gray-100 rounded-2xl animate-pulse" /></div>;
+  }
+  if (!store) {
     return (
       <div className="min-h-screen bg-white flex items-center justify-center p-6">
         <div className="text-center">
@@ -204,7 +245,7 @@ export default function Catalog() {
           <span className="text-sm text-gray-500">{pagination.total} produtos</span>
         </div>
 
-        {loading ? (
+        {productsLoading ? (
           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 mt-6">
             {[1,2,3,4,5,6,7,8].map(i=><ProductCardSkeleton key={i} />)}
           </div>
