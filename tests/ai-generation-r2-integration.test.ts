@@ -118,6 +118,22 @@ describe('Integração local IA -> R2 -> histórico sem chamadas pagas', () => {
       expect(mocks.edit).not.toHaveBeenCalled();
     });
 
+  it('não grava tokens ou resposta bruta do provedor no histórico de falhas', async () => {
+    const calls = setup();
+    const confidential = 'sk-secret-mock-provider-response-not-for-users';
+    mocks.edit.mockRejectedValueOnce(new Error(confidential));
+    const response = await run();
+    expect(response.status).toBe(500);
+    expect(JSON.stringify(await response.json())).not.toContain(confidential);
+    const history = f!.db.prepare(
+      'SELECT status, error_message FROM ai_generations WHERE store_id = ?'
+    ).get('a') as any;
+    expect(history.status).toBe('failed');
+    expect(history.error_message).not.toContain(confidential);
+    expect(history.error_message).toContain('Geração não concluída');
+    expect(calls.put).toHaveLength(0);
+  });
+
   it('retira imagem recém-enviada ao R2 se salvar histórico falhar', async () => {
     const calls = setup({ failSave: true });
     f!.db.exec(`CREATE TRIGGER fail_completed_ai BEFORE UPDATE ON ai_generations
