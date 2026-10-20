@@ -114,6 +114,15 @@ describe('Limites de armazenamento por loja em uploads', () => {
     expect(put).not.toHaveBeenCalled();
   });
 
+  it('arquivo vazio falha com erro 400 sem reservar espaço ou chamar R2', async () => {
+    const { put } = setup();
+    const result = await send(new Uint8Array(0));
+    expect(result.status).toBe(400);
+    expect((await result.json() as any).error).toMatch(/vazio/);
+    expect(put).not.toHaveBeenCalled();
+    expect(used()).toBe(0);
+  });
+
   it('não registra bytes de arquivo com assinatura inválida', async () => {
     const { put } = setup();
     expect((await send(new Uint8Array([137, 80, 78, 71]))).status).toBe(400);
