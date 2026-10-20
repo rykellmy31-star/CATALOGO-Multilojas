@@ -64,6 +64,34 @@ describe('Edição transacional de produtos e imagens', () => {
     expect((await update({ images: [normal] }, 'pb')).status).toBe(404);
     expect((f!.db.prepare('SELECT COUNT(*) AS n FROM product_images WHERE store_id = ?').get('b') as any).n).toBe(1);
   });
+  it('retorna 409 para SKU usado por outro produto da mesma loja', async () => {
+    seed();
+    f!.db.prepare("INSERT INTO products (id,store_id,name,slug,sku,price) VALUES ('p2','a','Segundo','segundo','SKU-OCUPADO',25)").run();
+    const original = ownImages();
+    const response = await update({ sku: 'SKU-OCUPADO', images: [normal] });
+    expect(response.status).toBe(409);
+    expect((await response.json() as any).error).toMatch(/SKU/);
+    expect(ownImages()).toEqual(original);
+  });
+
+  it('retorna 409 para slug de outro produto sem apagar imagens', async () => {
+    seed();
+    f!.db.prepare("INSERT INTO products (id,store_id,name,slug,price) VALUES ('p2','a','Segundo','slug-ocupado',25)").run();
+    const original = ownImages();
+    const response = await update({ slug: 'slug-ocupado', images: [normal] });
+    expect(response.status).toBe(409);
+    expect(ownImages()).toEqual(original);
+  });
+
+  it('permite SKU igual ao de outra loja, sem alterar a outra', async () => {
+    seed();
+    f!.db.prepare("UPDATE products SET sku = 'SKU-B' WHERE id = 'pb'").run();
+    const response = await update({ sku: 'SKU-B' });
+    expect(response.status).toBe(200);
+    expect((f!.db.prepare("SELECT sku FROM products WHERE id = 'pa'").get() as any).sku).toBe('SKU-B');
+    expect((f!.db.prepare("SELECT sku FROM products WHERE id = 'pb'").get() as any).sku).toBe('SKU-B');
+  });
+
   it('reordena imagens existentes sem perder os IDs', async () => {
     seed();
     expect((await update({ images: [normal, ai] })).status).toBe(200);
