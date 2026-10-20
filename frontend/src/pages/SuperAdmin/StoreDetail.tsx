@@ -61,6 +61,7 @@ export default function StoreDetail() {
 
   useEffect(() => {
     setAudit(null);
+    setAuditing(false);
     return () => {
       auditController.current?.abort();
       auditController.current = null;
