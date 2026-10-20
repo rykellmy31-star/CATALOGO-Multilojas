@@ -92,6 +92,24 @@ describe('Edição transacional de produtos e imagens', () => {
     expect((f!.db.prepare("SELECT sku FROM products WHERE id = 'pb'").get() as any).sku).toBe('SKU-B');
   });
 
+  it('rejeita slug explícito inválido preservando preço e fotos', async () => {
+    seed();
+    const original = ownImages();
+    const response = await update({ slug: '🚀🚀', price: 10, images: [normal] });
+    expect(response.status).toBe(400);
+    expect(ownImages()).toEqual(original);
+    expect((f!.db.prepare("SELECT price FROM products WHERE id = 'pa'").get() as any).price).toBe(50);
+  });
+
+  it('rejeita mudança de nome que produziria slug vazio', async () => {
+    seed();
+    const original = ownImages();
+    const response = await update({ name: '🚀🚀', price: 10 });
+    expect(response.status).toBe(400);
+    expect(ownImages()).toEqual(original);
+    expect((f!.db.prepare("SELECT name FROM products WHERE id = 'pa'").get() as any).name).toBe('Produto A');
+  });
+
   it('reordena imagens existentes sem perder os IDs', async () => {
     seed();
     expect((await update({ images: [normal, ai] })).status).toBe(200);
