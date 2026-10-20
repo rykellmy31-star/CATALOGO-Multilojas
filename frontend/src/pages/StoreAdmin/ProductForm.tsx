@@ -329,8 +329,14 @@ export default function ProductForm() {
           await api.post('/store/ai/approve-image', {
             product_id: id, image_url: aiResult.imageUrl, generation_id: aiResult.id
           });
-          const { data } = await api.get(`/store/products/${id}`);
-          setExistingImages(data.images || []);
+          // A aprovação foi confirmada: falha ao recarregar as miniaturas
+          // não é uma falha de aprovação e não deve estimular uma repetição.
+          try {
+            const { data } = await api.get(`/store/products/${id}`);
+            setExistingImages(data.images || []);
+          } catch {
+            toast.warning('Imagem IA aprovada, mas a galeria não atualizou. Reabra o produto para conferir.');
+          }
         } else {
           // No primeiro cadastro, a URL privada só será publicada ao salvar o produto.
           setImages(prev => [...new Set([...prev, aiResult.imageUrl])]);
