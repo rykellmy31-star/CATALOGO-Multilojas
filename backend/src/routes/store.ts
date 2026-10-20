@@ -177,30 +177,45 @@ store.post('/products', zValidator('json', createProductSchema), async (c) => {
   if (!await validRelations(c, data, storeId)) return c.json({ error: 'Referência não pertence à loja' }, 400);
   const user = c.get('user');
 
-  let slug = data.slug ? slugify(data.slug) : slugify(data.name);
-  const existingSlug = await c.env.DB.prepare('SELECT id FROM products WHERE store_id = ? AND slug = ?').bind(storeId, slug).first();
-  if (existingSlug) slug = `${slug}-${Date.now().toString(36).slice(-4)}`;
-
   const productId = crypto.randomUUID();
+  const baseSlug = data.slug ? slugify(data.slug) : slugify(data.name);
+  let slug = baseSlug;
 
-  await c.env.DB.prepare(`
+  // O índice UNIQUE resolve conflitos de slug inclusive em gravações simultâneas.
+  const insertSql = `
     INSERT INTO products (id, store_id, sku, name, slug, short_description, description, price, original_price, promotional_price, category_id, brand_id, status, is_featured, is_on_sale, stock_quantity, dimensions, technical_specs, variations, published_at)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).bind(
-    productId, storeId, data.sku || null, data.name, slug, data.short_description || null,
+    ON CONFLICT(store_id, slug) DO NOTHING
+  `;
+  const insertProduct = (candidateSlug: string) => c.env.DB.prepare(insertSql).bind(
+    productId, storeId, data.sku || null, data.name, candidateSlug, data.short_description || null,
     data.description || null, data.price, data.original_price ?? null, data.promotional_price ?? null,
     data.category_id || null, data.brand_id || null, data.status || 'draft',
     data.is_featured ? 1 : 0, data.is_on_sale ? 1 : 0, data.stock_quantity || 0,
     data.dimensions || null, data.technical_specs || null, data.variations || null,
     data.status === 'published' ? new Date().toISOString() : null
-  ).run();
+  );
 
-  // Imagens
-  if (data.images && Array.isArray(data.images)) {
-    for (let i = 0; i < data.images.length; i++) {
-      await c.env.DB.prepare(
-        'INSERT INTO product_images (id, product_id, store_id, url, is_primary, sort_order) VALUES (?, ?, ?, ?, ?, ?)'
-      ).bind(crypto.randomUUID(), productId, storeId, data.images[i], i === 0 ? 1 : 0, i).run();
+  const createBatch = (candidateSlug: string) => {
+    const statements: D1PreparedStatement[] = [insertProduct(candidateSlug)];
+    for (const [index, url] of (data.images || []).entries()) {
+      // Uma tentativa sem INSERT (slug repetido) não pode inserir fotos órfãs.
+      statements.push(c.env.DB.prepare(`
+        INSERT INTO product_images (id, product_id, store_id, url, is_primary, sort_order)
+        SELECT ?, ?, ?, ?, ?, ?
+        WHERE EXISTS (SELECT 1 FROM products WHERE id = ? AND store_id = ?)
+      `).bind(crypto.randomUUID(), productId, storeId, url, index === 0 ? 1 : 0,
+        index, productId, storeId));
+    }
+    return c.env.DB.batch(statements);
+  };
+
+  const initialResults = await createBatch(slug);
+  if (initialResults[0]?.meta?.changes === 0) {
+    slug = `${baseSlug}-${productId}`;
+    const retryResults = await createBatch(slug);
+    if (retryResults[0]?.meta?.changes === 0) {
+      return c.json({ error: 'Não foi possível gerar endereço único' }, 409);
     }
   }
 
