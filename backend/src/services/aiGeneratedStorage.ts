@@ -2,10 +2,16 @@
  * Guarda no R2 privado a imagem PNG devolvida pela API de edição.
  * O cliente recebe apenas uma URL controlada pelo Worker, nunca base64 nem URL temporária.
  */
+import { reserveStorageBytes, releaseStorageBytes } from '../utils/storageQuota.js';
+
 const MAX_GENERATED_IMAGE_BYTES = 10 * 1024 * 1024;
 const PNG_SIGNATURE = [137, 80, 78, 71, 13, 10, 26, 10];
 
-export type StoredGeneratedImage = { key: string; url: string };
+export type StoredGeneratedImage = { key: string; url: string; sizeBytes: number };
+
+export class StorageQuotaExceededError extends Error {
+  constructor() { super('Limite de armazenamento da loja atingido'); }
+}
 
 export function decodeGeneratedPng(base64: string): Uint8Array {
   if (typeof base64 !== 'string' || !base64 || base64.length > Math.ceil(MAX_GENERATED_IMAGE_BYTES / 3) * 4 + 4 ||
@@ -25,7 +31,8 @@ export function decodeGeneratedPng(base64: string): Uint8Array {
 }
 
 export async function saveGeneratedImage(
-  storage: Pick<R2Bucket, 'put'>,
+  storage: Pick<R2Bucket, 'put' | 'delete'>,
+  db: D1Database,
   storeId: string,
   productId: string | null,
   base64: string
@@ -35,10 +42,29 @@ export async function saveGeneratedImage(
     throw new Error('Identificador inválido');
   }
   const bytes = decodeGeneratedPng(base64);
+  const quota = await reserveStorageBytes(db, storeId, bytes.byteLength);
+  if (quota === 'quota_exceeded') throw new StorageQuotaExceededError();
+  if (quota !== 'reserved') throw new Error('Loja indisponível para armazenar imagem');
+
   const key = `stores/${storeId}/products/${productId || 'general'}/${crypto.randomUUID()}.png`;
-  const result = await storage.put(key, bytes, {
-    httpMetadata: { contentType: 'image/png', cacheControl: 'no-store' }
-  });
-  if (!result) throw new Error('Não foi possível armazenar a imagem gerada');
-  return { key, url: `/api/storage/${encodeURIComponent(key)}` };
+  let uploaded = false;
+  try {
+    const result = await storage.put(key, bytes, {
+      httpMetadata: { contentType: 'image/png', cacheControl: 'no-store' }
+    });
+    if (!result) throw new Error('Não foi possível armazenar a imagem gerada');
+    uploaded = true;
+    return { key, url: `/api/storage/${encodeURIComponent(key)}`, sizeBytes: bytes.byteLength };
+  } catch (error) {
+    let canRelease = !uploaded;
+    if (uploaded) {
+      try { await storage.delete(key); canRelease = true; }
+      catch { console.error('Falha ao remover imagem IA após erro no R2'); }
+    }
+    if (canRelease) {
+      try { await releaseStorageBytes(db, storeId, bytes.byteLength); }
+      catch { console.error('Falha ao devolver espaço da IA'); }
+    }
+    throw error;
+  }
 }
