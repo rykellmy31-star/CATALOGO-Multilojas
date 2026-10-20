@@ -2,7 +2,7 @@ import { Hono } from 'hono';
 import { authMiddleware, requireRole } from '../middleware/auth.js';
 import { tenantMiddleware } from '../middleware/tenant.js';
 import { zValidator } from '../middleware/validation.js';
-import { createStoreSchema, storeAdminSchema, publicLinkSchema } from '../utils/validation.js';
+import { createStoreSchema, storeAdminSchema, updatePlatformConfigSchema } from '../utils/validation.js';
 import { hashPassword } from '../utils/hash.js';
 import { slugify } from '../utils/slug.js';
 import { auditStoreStorage, validateStorageAuditOptions } from '../utils/storageAudit.js';
@@ -288,11 +288,9 @@ superadmin.get('/platform-config', async (c) => {
 });
 
 // PUT /api/superadmin/platform-config
-superadmin.put('/platform-config', async (c) => {
-  const data = await c.req.json() as any;
+superadmin.put('/platform-config', zValidator('json', updatePlatformConfigSchema), async (c) => {
+  const data = c.req.valid('json') as Record<string, unknown>;
   const user = c.get('user');
-
-  if (data.logo_url && !publicLinkSchema.safeParse(data.logo_url).success) return c.json({ error: 'URL do logo inválida' }, 400);
   const allowed = ['platform_name','logo_url','primary_color','secondary_color','accent_color','footer_text','support_email','ai_provider','ai_enabled','ai_daily_limit_default','ai_monthly_limit_default','storage_limit_per_store_mb'];
   const updates: string[] = [];
   const params: any[] = [];
@@ -306,7 +304,10 @@ superadmin.put('/platform-config', async (c) => {
   if (updates.length === 0) return c.json({ error: 'Nenhum campo para atualizar' }, 400);
   updates.push("updated_at = datetime('now')");
 
-  await c.env.DB.prepare(`UPDATE platform_config SET ${updates.join(', ')} WHERE id = 'platform-default'`).bind(...params).run();
+  const result = await c.env.DB.prepare(
+    `UPDATE platform_config SET ${updates.join(', ')} WHERE id = 'platform-default'`
+  ).bind(...params).run();
+  if (result.meta?.changes !== 1) return c.json({ error: 'Configuração da plataforma não encontrada' }, 404);
   
   await c.env.DB.prepare('INSERT INTO audit_logs (user_id, action, entity_type, details) VALUES (?, ?, ?, ?)').bind(user.userId, 'update_platform_config', 'platform_config', JSON.stringify(data)).run().catch(()=>{});
 
