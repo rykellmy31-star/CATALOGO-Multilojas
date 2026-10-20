@@ -27,8 +27,51 @@ describe('Atualização dos banners sem recarregar a vitrine', () => {
     const { refresh } = setup();
     const response = await refresh();
     expect(response.status).toBe(200);
-    expect((await response.json() as any).banners).toEqual([]);
+    const payload = await response.json() as any;
+    expect(payload.banners).toEqual([]);
+    expect(Math.abs(Date.parse(payload.next_transition_at) - Date.parse(future))).toBeLessThan(1000);
     expect(response.headers.get('Cache-Control')).toBe('no-store');
+  });
+
+  it('informa o próximo término enquanto a campanha está no ar', async () => {
+    const { refresh } = setup();
+    f!.db.prepare("UPDATE banners SET starts_at = ?, ends_at = ? WHERE id='banner-a'")
+      .run(old, future);
+    const payload = await (await refresh()).json() as any;
+    expect(payload.banners).toHaveLength(1);
+    expect(Math.abs(Date.parse(payload.next_transition_at) - Date.parse(future))).toBeLessThan(1000);
+  });
+
+  it('não agenda atualizações quando não restam eventos futuros', async () => {
+    const { refresh } = setup();
+    f!.db.prepare("UPDATE banners SET starts_at = ?, ends_at = NULL WHERE id='banner-a'")
+      .run(old);
+    const result = await (await refresh()).json() as any;
+    expect(result.banners).toHaveLength(1);
+    expect(result.next_transition_at).toBeNull();
+  });
+
+  it('seleciona o primeiro evento entre banners sem misturar lojas', async () => {
+    const { refresh } = setup();
+    const sooner = new Date(Date.now() + 5 * 60_000).toISOString();
+    f!.db.prepare(
+      'INSERT INTO banners(id,store_id,image_url,starts_at) VALUES (?,?,?,?)'
+    ).run('soon', 'a', image, sooner);
+    f!.db.prepare(
+      'INSERT INTO banners(id,store_id,image_url,starts_at) VALUES (?,?,?,?)'
+    ).run('foreign-sooner', 'b', image, old);
+    const payload = await (await refresh()).json() as any;
+    expect(Math.abs(Date.parse(payload.next_transition_at) - Date.parse(sooner))).toBeLessThan(1000);
+    expect(payload.banners.map((banner: any) => banner.id)).not.toContain('foreign-sooner');
+  });
+
+  it('home fornece próximo evento com o mesmo relógio da rota leve', async () => {
+    const { refresh } = setup();
+    const light = await (await refresh()).json() as any;
+    const home = await f!.request('/api/public/stores/loja-a', 'GET', undefined, null);
+    expect(home.status).toBe(200);
+    const full = await home.json() as any;
+    expect(full.next_transition_at).toBe(light.next_transition_at);
   });
 
   it('início de campanha é refletido sem uma nova visita à home', async () => {
