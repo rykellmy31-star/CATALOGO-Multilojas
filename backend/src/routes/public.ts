@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 import { parseAnalyticsEvent, parseAnalyticsSessionId, analyticsRateLimitKey, recordUniquePublicView, hashAnalyticsSessionId } from '../utils/analytics.js';
 import { parseCatalogPagination, parsePublicSearch, escapePublicLike } from '../utils/publicSearch.js';
+import { loadVisibleBanners } from '../utils/publicBanners.js';
 
 type Env = {
   Bindings: {
@@ -26,13 +27,7 @@ publicRoutes.get('/stores/:slug', async (c) => {
   if (!store) return c.json({ error: 'Loja não encontrada' }, 404);
 
   // Banners ativos
-  const banners = await c.env.DB.prepare(`
-    SELECT * FROM banners
-    WHERE store_id = ? AND is_active = 1
-      AND (starts_at IS NULL OR julianday(starts_at) <= julianday('now'))
-      AND (ends_at IS NULL OR julianday(ends_at) > julianday('now'))
-    ORDER BY sort_order, created_at DESC, id
-  `).bind(store.id).all();
+  const banners = await loadVisibleBanners(c.env.DB, store.id);
   
   // Categorias
   const categories = await c.env.DB.prepare('SELECT * FROM categories WHERE store_id = ? AND is_active = 1 ORDER BY sort_order, name').bind(store.id).all();
@@ -80,11 +75,23 @@ publicRoutes.get('/stores/:slug', async (c) => {
   c.header('Cache-Control', 'no-store');
   return c.json({
     store,
-    banners: (banners as any).results || banners,
+    banners,
     categories: (categories as any).results || categories,
     featured: (featured as any).results || featured,
     onSale: (onSale as any).results || onSale
   });
+});
+
+// GET /api/public/stores/:slug/banners - atualização leve sem registrar
+// visitas ao catálogo. O servidor é a autoridade para datas e habilitação.
+publicRoutes.get('/stores/:slug/banners', async (c) => {
+  const store = await c.env.DB.prepare(
+    "SELECT id FROM stores WHERE slug = ? AND status = 'active'"
+  ).bind(c.req.param('slug')).first() as { id: string } | null;
+  if (!store) return c.json({ error: 'Loja não encontrada' }, 404);
+  const banners = await loadVisibleBanners(c.env.DB, store.id);
+  c.header('Cache-Control', 'no-store');
+  return c.json({ banners });
 });
 
 // GET /api/public/stores/:slug/products - lista produtos públicos com filtros
