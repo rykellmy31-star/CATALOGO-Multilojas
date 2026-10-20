@@ -1,4 +1,5 @@
 import { Hono } from 'hono';
+import { parseCatalogPagination, parsePublicSearch, escapePublicLike } from '../utils/publicSearch.js';
 
 type Env = {
   Bindings: {
@@ -64,7 +65,10 @@ publicRoutes.get('/stores/:slug', async (c) => {
 // GET /api/public/stores/:slug/products - lista produtos públicos com filtros
 publicRoutes.get('/stores/:slug/products', async (c) => {
   const slug = c.req.param('slug');
-  const q = c.req.query('q');
+  const search = parsePublicSearch(c.req.query('q'));
+  if (!search.valid) return c.json({ error: 'Busca inválida' }, 400);
+  const q = search.term;
+  const qLike = q ? escapePublicLike(q) : undefined;
   const category = c.req.query('category');
   const brand = c.req.query('brand');
   const minPrice = c.req.query('minPrice');
@@ -74,9 +78,9 @@ publicRoutes.get('/stores/:slug/products', async (c) => {
   const max = parsePrice(maxPrice);
   if ([min, max].some(value => value !== undefined && (!Number.isFinite(value) || value < 0)) || (min !== undefined && max !== undefined && min > max)) return c.json({ error: 'Intervalo de preços inválido' }, 400);
   const sort = c.req.query('sort') || 'newest'; // newest, price_asc, price_desc, name
-  const page = Math.max(1, Number.parseInt(c.req.query('page') || '1') || 1);
-  const limit = Math.min(50, Math.max(1, Number.parseInt(c.req.query('limit') || '12') || 12));
-  const offset = (page - 1) * limit;
+  const pagination = parseCatalogPagination(c.req.query('page'), c.req.query('limit'));
+  if (!pagination) return c.json({ error: 'Paginação inválida' }, 400);
+  const { page, limit, offset } = pagination;
 
   const store = await c.env.DB.prepare(`SELECT id FROM stores WHERE slug = ? AND status = 'active'`).bind(slug).first() as any;
   if (!store) return c.json({ error: 'Loja não encontrada' }, 404);
@@ -90,9 +94,9 @@ publicRoutes.get('/stores/:slug/products', async (c) => {
   `;
   const params: any[] = [store.id];
 
-  if (q) {
-    query += ' AND (p.name LIKE ? OR p.description LIKE ? OR p.sku LIKE ? OR p.short_description LIKE ?)';
-    params.push(`%${q}%`, `%${q}%`, `%${q}%`, `%${q}%`);
+  if (qLike) {
+    query += " AND (p.name LIKE ? ESCAPE '\\' OR p.description LIKE ? ESCAPE '\\' OR p.sku LIKE ? ESCAPE '\\' OR p.short_description LIKE ? ESCAPE '\\')";
+    params.push(qLike, qLike, qLike, qLike);
   }
   if (category) {
     query += ' AND c.slug = ?';
@@ -127,9 +131,9 @@ publicRoutes.get('/stores/:slug/products', async (c) => {
   // Count
   let countQuery = `SELECT COUNT(*) as count FROM products p LEFT JOIN categories c ON p.category_id = c.id WHERE p.store_id = ? AND p.status = 'published'`;
   const countParams: any[] = [store.id];
-  if (q) {
-    countQuery += ' AND (p.name LIKE ? OR p.description LIKE ? OR p.sku LIKE ? OR p.short_description LIKE ?)';
-    countParams.push(`%${q}%`, `%${q}%`, `%${q}%`, `%${q}%`);
+  if (qLike) {
+    countQuery += " AND (p.name LIKE ? ESCAPE '\\' OR p.description LIKE ? ESCAPE '\\' OR p.sku LIKE ? ESCAPE '\\' OR p.short_description LIKE ? ESCAPE '\\')";
+    countParams.push(qLike, qLike, qLike, qLike);
   }
   if (category) { countQuery += ' AND c.slug = ?'; countParams.push(category); }
   if (minPrice) { countQuery += ` AND ${effectivePrice} >= ?`; countParams.push(min); }
@@ -219,7 +223,9 @@ publicRoutes.post('/stores/:slug/analytics', async (c) => {
 
 // GET /api/public/search - busca global (opcional)
 publicRoutes.get('/search', async (c) => {
-  const q = c.req.query('q');
+  const search = parsePublicSearch(c.req.query('q'));
+  if (!search.valid) return c.json({ error: 'Busca inválida' }, 400);
+  const q = search.term;
   if (!q || q.length < 2) return c.json({ products: [] });
 
   const products = await c.env.DB.prepare(`
@@ -227,9 +233,9 @@ publicRoutes.get('/search', async (c) => {
     FROM products p
     JOIN stores s ON p.store_id = s.id
     LEFT JOIN product_images pi ON pi.product_id = p.id AND pi.is_primary = 1
-    WHERE p.status = 'published' AND s.status = 'active' AND (p.name LIKE ? OR p.description LIKE ?)
+    WHERE p.status = 'published' AND s.status = 'active' AND (p.name LIKE ? ESCAPE '\' OR p.description LIKE ? ESCAPE '\')
     ORDER BY p.views DESC LIMIT 10
-  `).bind(`%${q}%`, `%${q}%`).all();
+  `).bind(escapePublicLike(q), escapePublicLike(q)).all();
 
   return c.json({ products: (products as any).results || products });
 });
