@@ -14,6 +14,7 @@ export default function Catalog() {
   const [products, setProducts] = useState<any[]>([]);
   const [featured, setFeatured] = useState<any[]>([]);
   const [banners, setBanners] = useState<any[]>([]);
+  const [nextBannerTransitionAt, setNextBannerTransitionAt] = useState<string | null>(null);
   const [pagination, setPagination] = useState<any>({ page: 1, pages: 1, total: 0 });
   const [loading, setLoading] = useState(true);
   const [storeLoading, setStoreLoading] = useState(true);
@@ -55,6 +56,7 @@ export default function Catalog() {
     setStore(null);
     setCategories([]);
     setBanners([]);
+    setNextBannerTransitionAt(null);
     setFeatured([]);
     api.get(`/public/stores/${slug}`, { signal: controller.signal })
       .then(({ data }) => {
@@ -62,6 +64,7 @@ export default function Catalog() {
         setStore(data.store || null);
         setCategories(data.categories || []);
         setBanners(data.banners || []);
+        setNextBannerTransitionAt(data.next_transition_at || null);
         setFeatured(data.featured || []);
       })
       .catch(() => {})
@@ -74,38 +77,53 @@ export default function Catalog() {
     return () => controller.abort();
   }, [slug]);
 
-  // Uma campanha pode começar ou terminar enquanto o visitante mantém
-  // o catálogo aberto. Atualiza apenas banners, sem repetir a visita/analytics.
+  // Só consulta quando uma campanha vai mudar de estado ou quando o
+  // visitante volta para a aba. Sem polling constante (economiza D1/Workers).
   useEffect(() => {
     let controller: AbortController | null = null;
     let lastRefresh = 0;
-    const refreshBanners = () => {
+    const refreshBanners = (force = false) => {
       if (document.visibilityState !== 'visible') return;
-      if (Date.now() - lastRefresh < 5000) return;
+      if (!force && Date.now() - lastRefresh < 5000) return;
       lastRefresh = Date.now();
       controller?.abort();
       const current = new AbortController();
       controller = current;
       api.get(`/public/stores/${slug}/banners`, { signal: current.signal })
         .then(({ data }) => {
-          if (!current.signal.aborted) setBanners(data.banners || []);
+          if (current.signal.aborted) return;
+          setBanners(data.banners || []);
+          setNextBannerTransitionAt(data.next_transition_at || null);
         })
-        .catch((error) => {
+        .catch(error => {
           if (!current.signal.aborted && error?.response?.status === 404) {
             setBanners([]);
+            setNextBannerTransitionAt(null);
           }
         });
     };
-    const interval = window.setInterval(refreshBanners, 60_000);
-    window.addEventListener('focus', refreshBanners);
-    document.addEventListener('visibilitychange', refreshBanners);
+    const refreshOnFocus = () => refreshBanners();
+    let transitionTimer: ReturnType<typeof setTimeout> | undefined;
+    if (nextBannerTransitionAt) {
+      const transitionTime = Date.parse(nextBannerTransitionAt);
+      if (Number.isFinite(transitionTime)) {
+        // Um pequeno intervalo após o evento evita executar antes do relógio
+        // do SQLite; limitar timeout evita overflow em datas muito futuras.
+        const delay = Math.max(1000, Math.min(
+          transitionTime - Date.now() + 1000, 2_147_000_000
+        ));
+        transitionTimer = window.setTimeout(() => refreshBanners(true), delay);
+      }
+    }
+    window.addEventListener('focus', refreshOnFocus);
+    document.addEventListener('visibilitychange', refreshOnFocus);
     return () => {
-      window.clearInterval(interval);
-      window.removeEventListener('focus', refreshBanners);
-      document.removeEventListener('visibilitychange', refreshBanners);
+      if (transitionTimer !== undefined) window.clearTimeout(transitionTimer);
+      window.removeEventListener('focus', refreshOnFocus);
+      document.removeEventListener('visibilitychange', refreshOnFocus);
       controller?.abort();
     };
-  }, [slug]);
+  }, [slug, nextBannerTransitionAt]);
 
   useEffect(() => {
     const controller = new AbortController();
