@@ -170,7 +170,7 @@ store.get('/products/:id', async (c) => {
   const product = await c.env.DB.prepare('SELECT * FROM products WHERE id = ? AND store_id = ?').bind(id, storeId).first() as any;
   if (!product) return c.json({ error: 'Produto não encontrado' }, 404);
 
-  const images = await c.env.DB.prepare('SELECT * FROM product_images WHERE product_id = ? ORDER BY sort_order, created_at').bind(id).all();
+  const images = await c.env.DB.prepare('SELECT * FROM product_images WHERE product_id = ? AND store_id = ? ORDER BY sort_order, created_at').bind(id, storeId).all();
   
   return c.json({ product, images: (images as any).results || images });
 });
@@ -217,12 +217,16 @@ store.post('/products', zValidator('json', createProductSchema), async (c) => {
           CASE WHEN g.ai_style IN ('modern_room', 'white_background', 'promotional', 'premium_catalog')
             THEN g.ai_style ELSE NULL END
         FROM products AS p
-        LEFT JOIN ai_generations AS g
-          ON g.store_id = p.store_id
-         AND g.generated_image_url = ?
-         AND g.status = 'completed'
+        LEFT JOIN ai_generations AS g ON g.id = (
+          SELECT gen.id FROM ai_generations AS gen
+          WHERE gen.store_id = p.store_id
+            AND gen.generated_image_url = ?
+            AND gen.status = 'completed'
+            AND (gen.product_id IS NULL OR gen.product_id = p.id)
+          ORDER BY gen.completed_at DESC, gen.created_at DESC, gen.id DESC
+          LIMIT 1
+        )
         WHERE p.id = ? AND p.store_id = ?
-        LIMIT 1
       `).bind(crypto.randomUUID(), url, index === 0 ? 1 : 0,
         index, url, productId, storeId));
     }
@@ -380,6 +384,7 @@ store.put('/products/:id', zValidator('json', createProductSchema.partial()), as
             SELECT gen.id FROM ai_generations AS gen
             WHERE gen.store_id = p.store_id AND gen.status = 'completed'
               AND gen.generated_image_url = ?
+              AND (gen.product_id IS NULL OR gen.product_id = p.id)
             ORDER BY gen.completed_at DESC, gen.created_at DESC, gen.id DESC
             LIMIT 1
           )
@@ -410,7 +415,7 @@ store.put('/products/:id', zValidator('json', createProductSchema.partial()), as
     'INSERT INTO audit_logs (user_id, store_id, action, entity_type, entity_id, details) VALUES (?, ?, ?, ?, ?, ?)'
   ).bind(user.userId, storeId, 'update_product', 'product', id, JSON.stringify(data)).run().catch(()=>{});
 
-  const product = await c.env.DB.prepare('SELECT * FROM products WHERE id = ?').bind(id).first();
+  const product = await c.env.DB.prepare('SELECT * FROM products WHERE id = ? AND store_id = ?').bind(id, storeId).first();
   return c.json({ product, message: 'Produto atualizado com sucesso!' });
 });
 
