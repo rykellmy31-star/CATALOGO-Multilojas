@@ -3,6 +3,7 @@ import { authMiddleware, requireRole } from '../middleware/auth.js';
 import { zValidator } from '../middleware/validation.js';
 import { createProductSchema, createCategorySchema, createBrandSchema, createBannerSchema, publicLinkSchema, aiGenerateSchema } from '../utils/validation.js';
 import { slugify } from '../utils/slug.js';
+import { resolveAIInputImage } from '../utils/aiImage.js';
 import { generateProductImage, generateProductDescription, AI_STYLES } from '../services/ai.js';
 
 type Env = {
@@ -614,6 +615,14 @@ store.post('/ai/generate', zValidator('json', aiGenerateSchema), async (c) => {
     }, 503);
   }
 
+  // Imagens privadas só podem ser obtidas no armazenamento da loja autenticada.
+  // Rejeitar entrada inválida antes de reservar cotas ou enviar dados a provedores.
+  const resolvedImage = await resolveAIInputImage(image_url, storeId, c.env.STORAGE);
+  if (!resolvedImage.ok) {
+    return c.json({ error: resolvedImage.error }, resolvedImage.status);
+  }
+  const aiImageUrl = resolvedImage.url;
+
   // A reserva é atômica: duas requisições não podem ultrapassar as cotas
   // após a verificação preliminar. O serviço pago só é chamado depois dela.
   const generationId = crypto.randomUUID();
@@ -648,13 +657,13 @@ store.post('/ai/generate', zValidator('json', aiGenerateSchema), async (c) => {
 
     if (generate_description) {
       const storeCtx = await c.env.DB.prepare('SELECT name, description FROM stores WHERE id = ?').bind(storeId).first() as any;
-      const descResult = await generateProductDescription(config as any, image_url, storeCtx?.name);
+      const descResult = await generateProductDescription(config as any, aiImageUrl, storeCtx?.name);
       result = { ...result, ...descResult };
     }
 
     if (generate_image) {
       try {
-        const imgResult = await generateProductImage(config as any, image_url, style, result.name);
+        const imgResult = await generateProductImage(config as any, aiImageUrl, style, result.name);
         result.imageUrl = imgResult.imageUrl;
         result.imageModel = imgResult.model;
         result.cost = (result.cost || 0) + imgResult.cost;
