@@ -20,7 +20,8 @@ describe('Catálogo: atualização leve de campanhas', () => {
   it('não recarrega a home nem contabiliza visita a cada atualização', () => {
     expect(source).toContain('api.get(`/public/stores/${slug}/banners`');
     expect(source).toContain('setBanners(data.banners || [])');
-    expect(source).toContain('window.setTimeout(() => refreshBanners(true), delay)');
+    expect(source).toContain('transitionTimer = window.setTimeout(() => {');
+    expect(source).toContain('else refreshBanners(true);');
     expect(source).toContain('setNextBannerTransitionAt(data.next_transition_at || null)');
     expect(source).not.toContain('window.setInterval(');
   });
@@ -47,6 +48,8 @@ describe('Catálogo: atualização leve de campanhas', () => {
   it('nunca estoura timeout de campanhas muito distantes', () => {
     expect(source).toContain('2_147_000_000');
     expect(source).toContain('Math.max(1000, Math.min(');
+    expect(source).toContain('if (Date.now() < transitionTime) scheduleTransition();');
+    expect(source).toContain('scheduleTransition();');
   });
 
   it('limpa banners quando o servidor informa que a loja não existe', () => {
