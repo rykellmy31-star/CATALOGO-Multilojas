@@ -123,6 +123,43 @@ describe('Limites de armazenamento por loja em uploads', () => {
     expect(used()).toBe(0);
   });
 
+  it('responde 400 a pedido JSON em vez de multipart sem acessar o R2', async () => {
+    const { put } = setup();
+    const response = await f!.request('/api/upload', 'POST', { file: 'falso' });
+    expect(response.status).toBe(400);
+    expect(put).not.toHaveBeenCalled();
+    expect(used()).toBe(0);
+  });
+
+  it('rejeita identificador de produto com tentativa de traversal', async () => {
+    const { put } = setup();
+    const response = await send(PNG, '../pb');
+    expect(response.status).toBe(400);
+    expect(put).not.toHaveBeenCalled();
+    expect(used()).toBe(0);
+  });
+
+  it('rejeita productId enviado como arquivo, sem acessar o banco ou R2', async () => {
+    const { put } = setup();
+    const form = new FormData();
+    form.append('file', new Blob([PNG], { type: 'image/png' }), 'imagem.png');
+    form.append('productId', new Blob(['pa'], { type: 'text/plain' }), 'id.txt');
+    const response = await f!.request('/api/upload', 'POST', form);
+    expect(response.status).toBe(400);
+    expect(put).not.toHaveBeenCalled();
+    expect(used()).toBe(0);
+  });
+
+  it('rejeita productId vazio explicitamente informado', async () => {
+    const { put } = setup();
+    const form = new FormData();
+    form.append('file', new Blob([PNG], { type: 'image/png' }), 'imagem.png');
+    form.append('productId', '');
+    const response = await f!.request('/api/upload', 'POST', form);
+    expect(response.status).toBe(400);
+    expect(put).not.toHaveBeenCalled();
+  });
+
   it('não registra bytes de arquivo com assinatura inválida', async () => {
     const { put } = setup();
     expect((await send(new Uint8Array([137, 80, 78, 71]))).status).toBe(400);
