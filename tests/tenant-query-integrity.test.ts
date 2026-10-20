@@ -112,6 +112,31 @@ describe('Consultas da vitrine e do painel não cruzam lojas', () => {
     expect(JSON.stringify(response)).not.toContain('Produto B');
   });
 
+  it('fotos principais duplicadas não duplicam produtos ou resultados públicos', async () => {
+    contaminatedFixture();
+    // Dois uploads concorrentes podem manter is_primary=1 na mesma loja.
+    f!.db.prepare(
+      'INSERT INTO product_images (id,product_id,store_id,url,is_primary,sort_order) VALUES (?,?,?,?,1,10)'
+    ).run('img-second-primary', 'pa', 'a', 'https://cdn.example.com/secondary.png');
+
+    const home = await get('/api/public/stores/loja-a');
+    expect(home.featured).toHaveLength(1);
+    expect(home.onSale).toHaveLength(1);
+    expect(home.featured[0].primary_image).toBe(ownImage);
+
+    const listing = await get('/api/public/stores/loja-a/products');
+    expect(listing.products).toHaveLength(1);
+    expect(listing.pagination.total).toBe(1);
+    expect(listing.products[0].primary_image).toBe(ownImage);
+
+    const search = await get('/api/public/search?q=Produto%20A');
+    expect(search.products.filter((p: any) => p.id === 'pa')).toHaveLength(1);
+
+    const dashboard = await get('/api/store/dashboard', true);
+    expect(dashboard.topProducts).toHaveLength(1);
+    expect(dashboard.topProducts[0].image).toBe(ownImage);
+  });
+
   it('a loja B continua acessível sem receber a imagem indevidamente vinculada a A', async () => {
     contaminatedFixture();
     const b = await get('/api/public/stores/loja-b/products');
