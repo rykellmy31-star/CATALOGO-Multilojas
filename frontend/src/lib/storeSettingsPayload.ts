@@ -9,12 +9,12 @@ export const STORE_SETTINGS_FIELDS = [
 
 export function createStoreSettingsPayload(
   store: Record<string, unknown>
-): Record<(typeof STORE_SETTINGS_FIELDS)[number], unknown> {
+): Partial<Record<(typeof STORE_SETTINGS_FIELDS)[number], unknown>> {
   const payload: Partial<Record<(typeof STORE_SETTINGS_FIELDS)[number], unknown>> = {};
   for (const field of STORE_SETTINGS_FIELDS) {
     if (Object.prototype.hasOwnProperty.call(store, field) && store[field] !== undefined) {
       payload[field] = store[field];
     }
   }
-  return payload as Record<(typeof STORE_SETTINGS_FIELDS)[number], unknown>;
+  return payload;
 }
