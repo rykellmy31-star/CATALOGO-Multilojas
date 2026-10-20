@@ -2,7 +2,7 @@ import { Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 import { parseAnalyticsEvent, parseAnalyticsSessionId, analyticsRateLimitKey, recordUniquePublicView, hashAnalyticsSessionId } from '../utils/analytics.js';
 import { parseCatalogPagination, parsePublicSearch, escapePublicLike } from '../utils/publicSearch.js';
-import { loadVisibleBanners } from '../utils/publicBanners.js';
+import { loadVisibleBanners, nextBannerTransitionAt } from '../utils/publicBanners.js';
 
 type Env = {
   Bindings: {
@@ -28,6 +28,7 @@ publicRoutes.get('/stores/:slug', async (c) => {
 
   // Banners ativos
   const banners = await loadVisibleBanners(c.env.DB, store.id);
+  const nextTransitionAt = await nextBannerTransitionAt(c.env.DB, store.id);
   
   // Categorias
   const categories = await c.env.DB.prepare('SELECT * FROM categories WHERE store_id = ? AND is_active = 1 ORDER BY sort_order, name').bind(store.id).all();
@@ -76,6 +77,7 @@ publicRoutes.get('/stores/:slug', async (c) => {
   return c.json({
     store,
     banners,
+    next_transition_at: nextTransitionAt,
     categories: (categories as any).results || categories,
     featured: (featured as any).results || featured,
     onSale: (onSale as any).results || onSale
@@ -90,8 +92,9 @@ publicRoutes.get('/stores/:slug/banners', async (c) => {
   ).bind(c.req.param('slug')).first() as { id: string } | null;
   if (!store) return c.json({ error: 'Loja não encontrada' }, 404);
   const banners = await loadVisibleBanners(c.env.DB, store.id);
+  const nextTransitionAt = await nextBannerTransitionAt(c.env.DB, store.id);
   c.header('Cache-Control', 'no-store');
-  return c.json({ banners });
+  return c.json({ banners, next_transition_at: nextTransitionAt });
 });
 
 // GET /api/public/stores/:slug/products - lista produtos públicos com filtros
