@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import api, { formatPrice, getImageUrl } from '../../lib/api';
+import api, { formatPrice } from '../../lib/api';
 import { Card, Badge, Button, Input } from '../../components/ui/Button';
+import AdminImage from '../../components/AdminImage';
 import { Plus, Search, Edit, Copy, Trash2, Eye, Download, Upload, Filter, Star, Tag } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -96,7 +97,7 @@ export default function Products() {
             {products.map(p => (
               <Card key={p.id} hover className="overflow-hidden flex flex-col">
                 <div className="relative aspect-[4/3] bg-gray-50 overflow-hidden">
-                  <img src={getImageUrl(p.primary_image)} alt={p.name} className="w-full h-full object-cover" loading="lazy" />
+                  <AdminImage url={p.primary_image} alt={p.name} className="w-full h-full object-cover" loading="lazy" />
                   <div className="absolute top-2 left-2 flex gap-1">
                     {p.is_featured ? <span className="px-2 py-0.5 rounded-full bg-amber-500 text-white text-xs font-bold">★ Destaque</span> : null}
                     {p.is_on_sale ? <span className="px-2 py-0.5 rounded-full bg-red-600 text-white text-xs font-bold">Promo</span> : null}
