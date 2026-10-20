@@ -160,15 +160,86 @@ export default function ProductForm() {
     finally { savingRef.current = false; setLoading(false); }
   };
 
+  const handleAIImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const input = e.currentTarget;
+    const file = input.files?.[0];
+    input.value = '';
+    if (!file) return;
+    if (savingRef.current || aiGeneratingRef.current || applyingAIRef.current) {
+      return toast.error('Aguarde a operação atual terminar');
+    }
+    if (!['image/jpeg', 'image/jpg', 'image/png', 'image/webp'].includes(file.type) ||
+        file.size > 10 * 1024 * 1024) {
+      return toast.error('A IA aceita fotos JPG, PNG ou WEBP com até 10 MB');
+    }
+    const upload = aiUploadRef.current;
+    upload.sequence++;
+    upload.controller?.abort();
+    const sequence = upload.sequence;
+    const controller = new AbortController();
+    upload.controller = controller;
+    upload.pending = true;
+    setAiUploading(true);
+    setAiImage(null);
+    setAiResult(null);
+    setAiError('');
+    try {
+      const fd = new FormData();
+      fd.append('file', file);
+      const { data } = await api.post('/upload', fd, {
+        headers: { 'Content-Type': 'multipart/form-data' }, signal: controller.signal
+      });
+      if (sequence !== upload.sequence || controller.signal.aborted) return;
+      if (typeof data?.url !== 'string' || !data.url.startsWith('/api/storage/')) {
+        throw new Error('URL de imagem ausente');
+      }
+      setAiImage(data.url);
+    } catch {
+      if (sequence === upload.sequence && !controller.signal.aborted) {
+        setAiError('Não foi possível enviar a foto para IA');
+        toast.error('Erro ao enviar foto para IA');
+      }
+    } finally {
+      if (sequence === upload.sequence) {
+        upload.pending = false;
+        upload.controller = null;
+        setAiUploading(false);
+      }
+    }
+  };
+
+  const removeAIImage = () => {
+    if (aiGeneratingRef.current || savingRef.current) return;
+    const upload = aiUploadRef.current;
+    upload.sequence++;
+    upload.controller?.abort();
+    upload.controller = null;
+    upload.pending = false;
+    setAiUploading(false);
+    setAiImage(null);
+    setAiResult(null);
+    setAiError('');
+  };
+
   const handleGenerateAI = async () => {
+    if (savingRef.current || galleryUploadingRef.current || aiUploadRef.current.pending) {
+      return toast.error('Aguarde o envio e o salvamento das imagens terminar');
+    }
     if (!aiImage) return toast.error('Envie uma imagem primeiro');
+    if (aiGeneratingRef.current) return;
+    aiGeneratingRef.current = true;
     setAiLoading(true);
     setAiError('');
     setAiResult(null);
     try {
       const { data } = await api.post('/store/ai/generate', { image_url: aiImage, style: aiStyle, product_id: id || undefined });
       setAiResult(data.generation);
-      toast.success('Geração concluída! Revise os dados.');
+      if (data.generation?.imageError) {
+        setAiError(data.generation.imageError);
+        toast.warning('Descrição gerada, mas a imagem não pôde ser concluída');
+      } else {
+        toast.success('Geração concluída! Revise os dados.');
+      }
     } catch (err: any) {
       const msg = err.response?.data?.message || err.response?.data?.error || 'Erro ao gerar';
       setAiError(msg);
@@ -177,11 +248,15 @@ export default function ProductForm() {
       } else {
         toast.error(msg);
       }
-    } finally { setAiLoading(false); }
+    } finally {
+      aiGeneratingRef.current = false;
+      setAiLoading(false);
+    }
   };
 
   const applyAIResult = async () => {
-    if (!aiResult || applyingAI) return;
+    if (!aiResult || applyingAIRef.current || savingRef.current || aiGeneratingRef.current) return;
+    applyingAIRef.current = true;
     setApplyingAI(true);
     try {
       if (aiResult.imageUrl) {
@@ -208,6 +283,7 @@ export default function ProductForm() {
     } catch (error: any) {
       toast.error(error?.response?.data?.error || 'Não foi possível aprovar a imagem de IA');
     } finally {
+      applyingAIRef.current = false;
       setApplyingAI(false);
     }
   };
@@ -261,33 +337,23 @@ export default function ProductForm() {
               <div>
                 <label className="text-sm font-medium text-gray-700">Imagem do produto para análise *</label>
                 <div className="mt-2">
-                  {aiImage ? (
+                  {aiImage && !aiUploading ? (
                     <div className="relative">
                       <AdminImage url={aiImage} alt="Para IA" className="w-full h-48 object-cover rounded-xl border" />
-                      <button onClick={()=>setAiImage(null)} className="absolute top-2 right-2 p-1.5 rounded-full bg-white shadow text-red-600 hover:bg-red-50">
+                      <button type="button" disabled={aiLoading || loading} onClick={removeAIImage} aria-label="Remover foto para IA" className="absolute top-2 right-2 p-1.5 rounded-full bg-white shadow text-red-600 hover:bg-red-50 disabled:opacity-50">
                         <X className="w-4 h-4" />
                       </button>
                     </div>
                   ) : (
                     <label className="flex flex-col items-center justify-center h-48 rounded-xl border-2 border-dashed border-sky-200 bg-white hover:bg-sky-50 cursor-pointer transition-colors">
                       <Upload className="w-8 h-8 text-sky-400" />
-                      <span className="text-sm font-medium text-gray-700 mt-2">Enviar foto</span>
-                      <span className="text-xs text-gray-500">O sistema analisará automaticamente</span>
-                      <input type="file" accept="image/*" className="hidden" onChange={(e)=>{
-                        const file = e.target.files?.[0];
-                        if (!file) return;
-                        const reader = new FileReader();
-                        reader.onload = () => setAiImage(reader.result as string);
-                        reader.readAsDataURL(file);
-                        // Também upload para storage
-                        const fd = new FormData();
-                        fd.append('file', file);
-                        api.post('/upload', fd, { headers: { 'Content-Type': 'multipart/form-data' } }).then(r=>setAiImage(r.data.url)).catch(()=>{});
-                      }} />
+                      <span className="text-sm font-medium text-gray-700 mt-2">{aiUploading ? 'Enviando foto...' : 'Enviar foto'}</span>
+                      <span className="text-xs text-gray-500">{aiUploading ? 'Aguarde o envio terminar' : 'A foto será enviada para sua loja antes da geração'}</span>
+                      <input type="file" accept="image/jpeg,image/png,image/webp" className="hidden" disabled={aiLoading || loading} onChange={handleAIImageUpload} />
                     </label>
                   )}
                 </div>
-                <p className="text-xs text-gray-500 mt-2">A IA preserva cores e modelo reais. Exibirá custo estimado.</p>
+                <p className="text-xs text-gray-500 mt-2">A IA usa a imagem original como referência; revise o resultado antes de publicar. A edição tem custo variável.</p>
               </div>
 
               <div className="space-y-4">
@@ -314,7 +380,7 @@ export default function ProductForm() {
                   <p className="text-gray-400 mt-1">Consulte limites da sua loja e custos do provedor antes de gerar.</p>
                 </div>
 
-                <Button onClick={handleGenerateAI} loading={aiLoading} disabled={!aiImage} className="w-full" size="lg">
+                <Button onClick={handleGenerateAI} loading={aiLoading} disabled={!aiImage || aiLoading || aiUploading || uploading || loading || applyingAI} className="w-full" size="lg">
                   <Sparkles className="w-4 h-4 mr-2" /> Gerar Nome, Descrição e Imagem
                 </Button>
 
