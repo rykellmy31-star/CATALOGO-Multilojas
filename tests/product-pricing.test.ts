@@ -16,7 +16,9 @@ it('filtra, ordena e conta pelo preço promocional exibido',async()=>{
   const sorted=await (await f.request('/api/public/stores/loja-a/products?sort=price_asc','GET',undefined,null)).json();
   expect(sorted.products.map((p:any)=>p.id)).toEqual(['pa','pa2']);
   const detail=await (await f.request('/api/public/stores/loja-a/products/produto-a','GET',undefined,null)).json();
-  expect(decodeURIComponent(detail.whatsappLink)).toContain('20.00');
+  expect(decodeURIComponent(detail.whatsappLink)).toContain('/loja/loja-a/produto/produto-a');
+  expect(decodeURIComponent(detail.whatsappLink)).toContain('preço e a disponibilidade atualizados');
+  expect(decodeURIComponent(detail.whatsappLink)).not.toContain('20.00');
   f.db.exec("UPDATE products SET promotional_price=0 WHERE id='pa'");
   const free=await (await f.request('/api/public/stores/loja-a/products?maxPrice=0','GET',undefined,null)).json();expect(free.products.map((p:any)=>p.id)).toEqual(['pa']);
 });
