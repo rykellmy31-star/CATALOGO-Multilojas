@@ -43,8 +43,13 @@ function mount(initial: Record<string, string> = {}) {
     createElement: (type: string, props: any) => { if (type === 'Provider') value = props.value; return null; }
   };
   const module = { exports: {} as any };
+  const storageListeners = new Set<(event: any) => void>();
+  const window = {
+    addEventListener: (type: string, fn: (event: any) => void) => { if (type === 'storage') storageListeners.add(fn); },
+    removeEventListener: (type: string, fn: (event: any) => void) => { if (type === 'storage') storageListeners.delete(fn); }
+  };
   runInNewContext(compiled, {
-    module, exports: module.exports, localStorage, AbortController,
+    module, exports: module.exports, localStorage, window, AbortController,
     require: (name: string) => {
       if (name === 'react') return { ...React, default: React };
       if (name === '../lib/api') return { __esModule: true, default: api };
@@ -57,7 +62,12 @@ function mount(initial: Record<string, string> = {}) {
   mounted = true;
   const cleanups = effects.map(fn => fn()).filter(Boolean);
   render();
-  return { calls, storage, get auth() { return render(); }, unmount: () => cleanups.forEach(fn => fn()) };
+  const externalToken = (nextToken: string | null) => {
+    if (nextToken === null) localStorage.removeItem('token');
+    else localStorage.setItem('token', nextToken);
+    for (const listener of storageListeners) listener({ key: 'token', storageArea: localStorage, newValue: nextToken });
+  };
+  return { calls, storage, externalToken, get auth() { return render(); }, unmount: () => cleanups.forEach(fn => fn()) };
 }
 const user = (id: string) => ({ id, name: id, email: `${id}@exemplo.test`, role: 'store_admin', store_id: `loja-${id}` });
 const flush = async () => { await Promise.resolve(); await Promise.resolve(); };
@@ -113,4 +123,74 @@ test('login simultâneo usa somente a resposta mais recente', async () => {
   f.calls[0].resolve({ data: { token: 'A', user: user('A') } });
   await expect(first).rejects.toThrow('substituída');
   expect(f.auth.user.id).toBe('B');
+});
+
+
+test('logout em outra aba limpa imediatamente identidade e cache', () => {
+  const f = mount({ token: 'A', user: JSON.stringify(user('antigo')) });
+  f.externalToken(null);
+  expect(f.auth.user).toBeNull();
+  expect(f.auth.token).toBeNull();
+  expect(f.auth.loading).toBe(false);
+  expect(f.storage.has('user')).toBe(false);
+});
+
+test('login em outra aba valida token novo com credencial explícita', async () => {
+  const f = mount({ token: 'A', user: JSON.stringify(user('antigo')) });
+  const old = f.calls[0];
+  f.externalToken('B');
+  expect(old.config.signal.aborted).toBe(true);
+  expect(f.auth.user).toBeNull();
+  expect(f.auth.loading).toBe(true);
+  const current = f.calls[1];
+  expect(current.config.headers.Authorization).toBe('Bearer B');
+  current.resolve({ data: { user: user('novo') } });
+  await flush();
+  expect(f.auth.user.id).toBe('novo');
+  expect(f.auth.token).toBe('B');
+  expect(f.auth.loading).toBe(false);
+});
+
+test('resposta da aba anterior não restaura usuário antigo', async () => {
+  const f = mount({ token: 'A' });
+  const old = f.calls[0];
+  f.externalToken('B');
+  f.calls[1].resolve({ data: { user: user('novo') } });
+  await flush();
+  old.resolve({ data: { user: user('antigo') } });
+  await flush();
+  expect(f.auth.user.id).toBe('novo');
+});
+
+test('troca rápida de token cancela consulta anterior', async () => {
+  const f = mount();
+  f.externalToken('B');
+  const previous = f.calls[0];
+  f.externalToken('C');
+  expect(previous.config.signal.aborted).toBe(true);
+  f.calls[1].resolve({ data: { user: user('C') } });
+  await flush();
+  previous.reject(new Error('401 antigo'));
+  await flush();
+  expect(f.auth.user.id).toBe('C');
+  expect(f.storage.get('token')).toBe('C');
+});
+
+test('falha de token recebido de outra aba descarta credenciais', async () => {
+  const f = mount();
+  f.externalToken('invalido');
+  f.calls[0].reject(new Error('401'));
+  await flush();
+  expect(f.auth.user).toBeNull();
+  expect(f.auth.token).toBeNull();
+  expect(f.storage.has('token')).toBe(false);
+});
+
+test('logout de outra aba durante login local invalida resposta antiga', async () => {
+  const f = mount();
+  const pending = f.auth.login('A', 'senha');
+  f.externalToken('B');
+  f.calls[0].resolve({ data: { token: 'A', user: user('antigo') } });
+  await expect(pending).rejects.toThrow('substituída');
+  expect(f.storage.get('token')).toBe('B');
 });

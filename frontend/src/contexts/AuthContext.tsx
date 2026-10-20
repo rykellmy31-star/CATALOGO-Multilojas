@@ -45,6 +45,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [loading, setLoading] = useState(true);
   const authRevision = useRef(0);
   const authCheck = useRef<AbortController | null>(null);
+  const observedToken = useRef<string | null>(localStorage.getItem('token'));
 
   useEffect(() => {
     const revision = ++authRevision.current;
@@ -89,6 +90,57 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     };
   }, []);
 
+  // Sincroniza logout/login entre abas sem restaurar dados de outra sessão.
+  useEffect(() => {
+    const onStorage = (event: StorageEvent) => {
+      if (event.storageArea !== localStorage || (event.key !== 'token' && event.key !== null)) return;
+      const nextToken = localStorage.getItem('token');
+      if (observedToken.current === nextToken) return;
+      observedToken.current = nextToken;
+
+      const revision = ++authRevision.current;
+      authCheck.current?.abort();
+      authCheck.current = null;
+      // Nunca exibe nem mantém em cache o usuário antigo durante a troca.
+      localStorage.removeItem('user');
+      setUser(null);
+      setToken(nextToken);
+      setLoading(Boolean(nextToken));
+      if (!nextToken) return;
+
+      const controller = new AbortController();
+      authCheck.current = controller;
+      const validateSession = async () => {
+        try {
+          const { data } = await api.get('/auth/me', {
+            signal: controller.signal,
+            headers: { Authorization: `Bearer ${nextToken}` }
+          });
+          if (controller.signal.aborted || authRevision.current !== revision || localStorage.getItem('token') !== nextToken) return;
+          const mapped = normalizeUser(data.user);
+          setUser(mapped);
+          setToken(nextToken);
+          localStorage.setItem('user', JSON.stringify(mapped));
+        } catch {
+          if (controller.signal.aborted || authRevision.current !== revision || localStorage.getItem('token') !== nextToken) return;
+          observedToken.current = null;
+          localStorage.removeItem('token');
+          localStorage.removeItem('user');
+          setUser(null);
+          setToken(null);
+        } finally {
+          if (!controller.signal.aborted && authRevision.current === revision) {
+            if (authCheck.current === controller) authCheck.current = null;
+            setLoading(false);
+          }
+        }
+      };
+      void validateSession();
+    };
+    window.addEventListener('storage', onStorage);
+    return () => window.removeEventListener('storage', onStorage);
+  }, []);
+
   const login = async (email: string, password: string) => {
     const revision = ++authRevision.current;
     authCheck.current?.abort();
@@ -97,6 +149,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const { data } = await api.post('/auth/login', { email, password });
       if (authRevision.current !== revision) throw new Error('Tentativa de login substituída por outra sessão.');
       const mapped = normalizeUser(data.user);
+      observedToken.current = data.token;
       localStorage.setItem('token', data.token);
       localStorage.setItem('user', JSON.stringify(mapped));
       setToken(data.token);
@@ -114,6 +167,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     authCheck.current?.abort();
     authCheck.current = null;
     const savedToken = localStorage.getItem('token');
+    observedToken.current = null;
     localStorage.removeItem('token');
     localStorage.removeItem('user');
     setUser(null);
