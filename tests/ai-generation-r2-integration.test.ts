@@ -4,7 +4,8 @@ import { fixture } from './helpers';
 const PNG = Uint8Array.from([137,80,78,71,13,10,26,10,...Array(32).fill(0)]);
 const output = Buffer.from(PNG).toString('base64');
 const mocks = vi.hoisted(() => ({
-  edit: vi.fn(async () => ({ imageBase64: '', model: 'gpt-image-2.5-flare', cost: 0 }))
+  edit: vi.fn(async (_config: unknown, _source: string, _style?: string, _name?: string) =>
+    ({ imageBase64: '', model: 'gpt-image-2.5-flare', cost: 0 }))
 }));
 vi.mock('../backend/src/services/ai.js', async importOriginal => ({
   ...await importOriginal<typeof import('../backend/src/services/ai')>(),
