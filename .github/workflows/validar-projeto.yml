@@ -1,5 +1,8 @@
 name: Validar projeto
 on:
+  push:
+    branches:
+      - desenvolvimento/seguranca-e-implantacao
   workflow_dispatch:
     inputs:
       navegador:
@@ -14,8 +17,8 @@ permissions:
 jobs:
   validar:
     name: ${{ github.event_name == 'workflow_dispatch' && !inputs.navegador && 'validar-basico-manual' || 'validar' }}
-    # Never runs on push, pull_request, labels, or schedules.
-    if: github.event_name == 'workflow_dispatch'
+    # Somente push na branch de desenvolvimento ou execução manual.
+    # Commits com [skip ci] não acionam a validação automática.
     timeout-minutes: 15
     runs-on: ubuntu-latest
     steps:
