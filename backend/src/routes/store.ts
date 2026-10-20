@@ -4,6 +4,7 @@ import { zValidator } from '../middleware/validation.js';
 import { createProductSchema, createCategorySchema, createBrandSchema, createBannerSchema, publicLinkSchema, aiGenerateSchema } from '../utils/validation.js';
 import { slugify } from '../utils/slug.js';
 import { resolveAIInputImage } from '../utils/aiImage.js';
+import { isOwnedStorageImageUrl, areOwnedStorageImages } from '../utils/imageOwnership.js';
 import { saveGeneratedImage } from '../services/aiGeneratedStorage.js';
 import { generateProductImage, generateProductDescription, AI_STYLES } from '../services/ai.js';
 
@@ -177,6 +178,9 @@ store.post('/products', zValidator('json', createProductSchema), async (c) => {
   const storeId = getStoreId(c);
   const data = c.req.valid('json');
   if (!await validRelations(c, data, storeId)) return c.json({ error: 'Referência não pertence à loja' }, 400);
+  if (!areOwnedStorageImages(data.images, storeId)) {
+    return c.json({ error: 'Imagem não pertence à loja' }, 400);
+  }
   const user = c.get('user');
 
   const productId = crypto.randomUUID();
@@ -264,6 +268,9 @@ store.put('/products/:id', zValidator('json', createProductSchema.partial()), as
   const id = c.req.param('id');
   const data = c.req.valid('json');
   if (!await validRelations(c, data, storeId)) return c.json({ error: 'Referência não pertence à loja' }, 400);
+  if (!areOwnedStorageImages(data.images, storeId)) {
+    return c.json({ error: 'Imagem não pertence à loja' }, 400);
+  }
   const user = c.get('user');
 
   const existing = await c.env.DB.prepare('SELECT * FROM products WHERE id = ? AND store_id = ?').bind(id, storeId).first() as any;
@@ -557,6 +564,9 @@ store.post('/banners', zValidator('json', createBannerSchema), async (c) => {
   const storeId = getStoreId(c);
   const data = c.req.valid('json');
   if (!await validRelations(c, data, storeId)) return c.json({ error: 'Referência não pertence à loja' }, 400);
+  if (!isOwnedStorageImageUrl(data.image_url, storeId)) {
+    return c.json({ error: 'Imagem não pertence à loja' }, 400);
+  }
   const id = crypto.randomUUID();
   await c.env.DB.prepare('INSERT INTO banners (id, store_id, title, subtitle, image_url, link_url, button_text, position, is_active, sort_order) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').bind(id, storeId, data.title || null, data.subtitle || null, data.image_url, data.link_url || null, data.button_text || null, data.position || 'hero', data.is_active ? 1 : 0, data.sort_order || 0).run();
   const banner = await c.env.DB.prepare('SELECT * FROM banners WHERE id = ? AND store_id = ?').bind(id, storeId).first();
@@ -569,6 +579,9 @@ store.put('/banners/:id', zValidator('json', createBannerSchema.partial()), asyn
   const id = c.req.param('id');
   const data = c.req.valid('json');
   if (!await validRelations(c, data, storeId)) return c.json({ error: 'Referência não pertence à loja' }, 400);
+  if (data.image_url !== undefined && !isOwnedStorageImageUrl(data.image_url, storeId)) {
+    return c.json({ error: 'Imagem não pertence à loja' }, 400);
+  }
   const updates: string[] = [];
   const params: any[] = [];
   const fields = ['title','subtitle','image_url','link_url','button_text','position','sort_order'];
@@ -603,6 +616,10 @@ store.get('/settings', async (c) => {
 store.put('/settings', async (c) => {
   const storeId = getStoreId(c);
   const data = await c.req.json() as any;
+  if (['logo_url', 'banner_url'].some(field =>
+    data[field] !== undefined && !isOwnedStorageImageUrl(data[field], storeId))) {
+    return c.json({ error: 'Imagem não pertence à loja' }, 400);
+  }
   const user = c.get('user');
 
   for (const field of ['logo_url', 'banner_url', 'website', 'facebook']) {
