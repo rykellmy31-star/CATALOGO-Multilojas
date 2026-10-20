@@ -62,15 +62,35 @@ export default function StoreDetail() {
     };
   }, [id]);
 
-  const fetchStore = async () => {
+  const currentStoreIdRef = useRef(id);
+  currentStoreIdRef.current = id;
+
+  const fetchStore = async (signal?: AbortSignal, requestedId: string | undefined = id) => {
+    if (!requestedId) return;
     try {
-      const { data } = await api.get(`/superadmin/stores/${id}`);
+      const { data } = await api.get(`/superadmin/stores/${requestedId}`, { signal });
+      // Uma resposta atrasada não pode substituir os dados de outra loja.
+      if (signal?.aborted || currentStoreIdRef.current !== requestedId) return;
       setStore(data.store);
       setEdit(data.store);
       setAdmins(data.admins?.results || data.admins || []);
-    } catch { toast.error('Erro ao carregar loja'); } finally { setLoading(false); }
+    } catch {
+      if (!signal?.aborted && currentStoreIdRef.current === requestedId) {
+        toast.error('Erro ao carregar loja');
+      }
+    } finally {
+      if (!signal?.aborted && currentStoreIdRef.current === requestedId) setLoading(false);
+    }
   };
-  useEffect(()=>{ fetchStore(); }, [id]);
+  useEffect(() => {
+    const controller = new AbortController();
+    setLoading(true);
+    setStore(null);
+    setEdit(null);
+    setAdmins([]);
+    fetchStore(controller.signal, id);
+    return () => controller.abort();
+  }, [id]);
 
   const handleSave = async () => {
     try {
