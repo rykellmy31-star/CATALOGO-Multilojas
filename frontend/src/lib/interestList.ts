@@ -1,3 +1,5 @@
+import { getWhatsAppContactUrl } from './whatsapp';
+
 // Uma lista de interesse não deve guardar preços: eles podem mudar na loja.
 export type InterestProduct = { id: string; name: string; slug: string };
 export const MAX_INTEREST_PRODUCTS = 30;
@@ -30,8 +32,8 @@ export function buildInterestListUrl(
   origin: string
 ): string | null {
   if (typeof whatsapp !== 'string' || typeof storeName !== 'string' || typeof storeSlug !== 'string') return null;
-  const phone = whatsapp.replace(/\D/g, '');
-  if (phone.length < 10 || phone.length > 15 || !/^[A-Za-z0-9][A-Za-z0-9_-]{0,199}$/.test(storeSlug)) return null;
+  const contactUrl = getWhatsAppContactUrl(whatsapp);
+  if (!contactUrl || !/^[A-Za-z0-9][A-Za-z0-9_-]{0,199}$/.test(storeSlug)) return null;
   const selected = normalizeInterestProducts(products);
   if (!selected.length) return null;
   let base: URL;
@@ -43,5 +45,5 @@ export function buildInterestListUrl(
     return `• ${product.name} - ${url.toString()}`;
   });
   const message = `Olá! Tenho interesse nos seguintes produtos da ${safeStoreName}:\n\n${lines.join('\n')}\n\nConsulte os preços e a disponibilidade atualizados nos links. Gostaria de mais informações!`;
-  return `https://wa.me/${phone}?text=${encodeURIComponent(message)}`;
+  return `${contactUrl}?text=${encodeURIComponent(message)}`;
 }
