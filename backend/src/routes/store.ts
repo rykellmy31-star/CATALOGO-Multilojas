@@ -256,23 +256,56 @@ store.put('/products/:id', zValidator('json', createProductSchema.partial()), as
     updates.push("published_at = datetime('now')");
   }
   
-  if (updates.length === 0 && !data.images) return c.json({ error: 'Nenhum campo para atualizar' }, 400);
-  
+  if (updates.length === 0 && data.images === undefined) {
+    return c.json({ error: 'Nenhum campo para atualizar' }, 400);
+  }
+
+  // Toda a edição é transacional, inclusive a remoção e inclusão de imagens.
+  const statements: D1PreparedStatement[] = [];
   if (updates.length > 0) {
     updates.push("updated_at = datetime('now')");
     params.push(id, storeId);
-    await c.env.DB.prepare(`UPDATE products SET ${updates.join(', ')} WHERE id = ? AND store_id = ?`).bind(...params).run();
+    statements.push(c.env.DB.prepare(`UPDATE products SET ${updates.join(', ')} WHERE id = ? AND store_id = ?`).bind(...params));
   }
 
-  // Atualizar imagens se fornecidas
-  if (data.images && Array.isArray(data.images)) {
-    await c.env.DB.prepare('DELETE FROM product_images WHERE product_id = ? AND is_ai_generated = 0').bind(id).run();
-    for (let i = 0; i < data.images.length; i++) {
-      await c.env.DB.prepare(
-        'INSERT INTO product_images (id, product_id, store_id, url, is_primary, sort_order) VALUES (?, ?, ?, ?, ?, ?)'
-      ).bind(crypto.randomUUID(), id, storeId, data.images[i], i === 0 ? 1 : 0, i).run();
+  if (data.images !== undefined) {
+    // A lista enviada é o estado final desejado. Preservamos metadados de IA
+    // e os IDs das imagens mantidas, sem deixar cópias duplicadas.
+    const desiredUrls = [...new Set(data.images)];
+    const current = await c.env.DB.prepare(
+      'SELECT id, url FROM product_images WHERE product_id = ? AND store_id = ? ORDER BY is_ai_generated DESC, sort_order, created_at, id'
+    ).bind(id, storeId).all();
+    const currentRows = (current.results || []) as { id: string; url: string }[];
+    const existingByUrl = new Map<string, string>();
+    const duplicateIds = new Set<string>();
+    for (const image of currentRows) {
+      if (existingByUrl.has(image.url)) duplicateIds.add(image.id);
+      else existingByUrl.set(image.url, image.id);
+    }
+    const desiredSet = new Set(desiredUrls);
+    for (const image of currentRows) {
+      if (!desiredSet.has(image.url) || duplicateIds.has(image.id)) {
+        statements.push(c.env.DB.prepare(
+          'DELETE FROM product_images WHERE id = ? AND product_id = ? AND store_id = ?'
+        ).bind(image.id, id, storeId));
+      }
+    }
+    for (let i = 0; i < desiredUrls.length; i++) {
+      const url = desiredUrls[i];
+      const imageId = existingByUrl.get(url);
+      if (imageId) {
+        statements.push(c.env.DB.prepare(
+          'UPDATE product_images SET sort_order = ?, is_primary = ? WHERE id = ? AND product_id = ? AND store_id = ?'
+        ).bind(i, i === 0 ? 1 : 0, imageId, id, storeId));
+      } else {
+        statements.push(c.env.DB.prepare(
+          'INSERT INTO product_images (id, product_id, store_id, url, is_primary, sort_order) VALUES (?, ?, ?, ?, ?, ?)'
+        ).bind(crypto.randomUUID(), id, storeId, url, i === 0 ? 1 : 0, i));
+      }
     }
   }
+
+  if (statements.length > 0) await c.env.DB.batch(statements);
 
   await c.env.DB.prepare(
     'INSERT INTO audit_logs (user_id, store_id, action, entity_type, entity_id, details) VALUES (?, ?, ?, ?, ?, ?)'
