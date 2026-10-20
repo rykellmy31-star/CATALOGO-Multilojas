@@ -7,7 +7,7 @@ afterEach(() => { state?.db.close(); state = undefined; });
 const imageKey = 'stores/a/products/general/preview-test.jpg';
 const previewUrl = `/api/upload/preview/${encodeURIComponent(imageKey)}`;
 
-function setup(contentType: string | undefined = 'image/jpeg') {
+function setup(contentType: string | null = 'image/jpeg') {
   state = fixture();
   const reads: string[] = [];
   (state.env as any).STORAGE = {
@@ -15,7 +15,7 @@ function setup(contentType: string | undefined = 'image/jpeg') {
       reads.push(key);
       return {
         body: new Blob(['image']).stream(),
-        httpMetadata: contentType === undefined ? {} : { contentType },
+        httpMetadata: contentType === null ? {} : { contentType },
         etag: 'private-preview-test'
       };
     }
@@ -56,7 +56,7 @@ describe('Prévia privada de imagens R2', () => {
     });
 
   it('recusa objetos legados sem MIME', async () => {
-    const t = setup(undefined);
+    const t = setup(null);
     expect((await t.request(previewUrl)).status).toBe(404);
   });
 
