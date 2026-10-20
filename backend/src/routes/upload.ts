@@ -10,6 +10,16 @@ type Env = {
   };
 };
 
+// Objetos legados do R2 não podem determinar Content-Type arbitrário na nossa origem.
+// Recusar inclusive MIME ausente e MIME composto evita interpretação como HTML/SVG/JS.
+function normalizeStoredImageType(contentType?: string): string | null {
+  const type = contentType?.trim().toLowerCase();
+  if (type === 'image/jpg') return 'image/jpeg';
+  if (type === 'image/jpeg' || type === 'image/png' ||
+      type === 'image/webp' || type === 'image/gif') return type;
+  return null;
+}
+
 const upload = new Hono<Env>();
 
 upload.use('/', authMiddleware as any);
@@ -61,8 +71,8 @@ upload.post('/', async (c) => {
   try {
     await c.env.STORAGE.put(key, arrayBuffer, {
       httpMetadata: {
-        contentType: file.type,
-        cacheControl: 'public, max-age=31536000'
+        contentType: file.type === 'image/jpg' ? 'image/jpeg' : file.type,
+        cacheControl: 'no-store'
       }
     });
   } catch (e: any) {
@@ -70,9 +80,8 @@ upload.post('/', async (c) => {
     return c.json({ error: 'Armazenamento indisponível. Tente novamente.' }, 503);
   }
 
-  // URL pública
-  const publicBase = c.env.R2_PUBLIC_URL;
-  const url = publicBase ? `${publicBase.replace(/\/$/, '')}/${key}` : `/api/storage/${encodeURIComponent(key)}`;
+  // URLs diretas do R2 contornariam o status de publicação do produto.
+  const url = `/api/storage/${encodeURIComponent(key)}`;
 
   // Se for imagem de produto, já insere no banco
   if (productId) {
@@ -100,10 +109,15 @@ upload.get('/storage/:key{.*}', async (c) => {
     const obj = await c.env.STORAGE.get(key);
     if (!obj) return c.json({ error: 'Arquivo não encontrado' }, 404);
 
+    // Nunca servir metadados R2 que possam forçar execução no navegador.
+    const type = normalizeStoredImageType(obj.httpMetadata?.contentType);
+    if (!type) return c.json({ error: 'Arquivo não encontrado' }, 404);
+
     return new Response(obj.body, {
       headers: {
-        'Content-Type': obj.httpMetadata?.contentType || 'image/jpeg',
-        'Cache-Control': 'public, max-age=31536000',
+        'Content-Type': type,
+        // A publicação pode ser revogada; imagens não devem permanecer em cache.
+        'Cache-Control': 'no-store',
         'ETag': obj.etag,
         'X-Content-Type-Options': 'nosniff'
       }
