@@ -59,6 +59,37 @@ describe('Categorias e marcas: consistência e isolamento entre lojas', () => {
     expect((await req('/brands', 'POST', { name: '🚀🚀' })).status).toBe(400);
   });
 
+  it('categoria pai vazia é aceita como ausência de vínculo', async () => {
+    const { req, category } = setup();
+    const response = await req('/categories', 'POST', {
+      name: 'Sem hierarquia', parent_id: ''
+    });
+    expect(response.status).toBe(201);
+    const created = (await response.json() as any).category;
+    expect(created.parent_id).toBeNull();
+    expect((await req('/categories/' + created.id, 'PUT', {
+      parent_id: 'ca'
+    })).status).toBe(200);
+    expect(category(created.id).parent_id).toBe('ca');
+    expect((await req('/categories/' + created.id, 'PUT', {
+      parent_id: ''
+    })).status).toBe(200);
+    expect(category(created.id).parent_id).toBeNull();
+  });
+
+  it('reparentalizações concorrentes não formam ciclo de duas categorias', async () => {
+    const { req, category } = setup();
+    f!.db.exec("INSERT INTO categories (id,store_id,name,slug) VALUES ('c2','a','Filha 2','filha-2')");
+    const [first, second] = await Promise.all([
+      req('/categories/ca', 'PUT', { parent_id: 'c2' }),
+      req('/categories/c2', 'PUT', { parent_id: 'ca' })
+    ]);
+    expect([first.status, second.status].sort()).toEqual([200, 400]);
+    const aParent = category('ca').parent_id;
+    const bParent = category('c2').parent_id;
+    expect(aParent === 'c2' && bParent === 'ca').toBe(false);
+  });
+
   it('categoria não pode apontar para si mesma', async () => {
     const { req, category } = setup();
     const response = await req('/categories/ca', 'PUT', { parent_id: 'ca', name: 'Não atualizar' });
