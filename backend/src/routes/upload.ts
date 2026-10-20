@@ -60,9 +60,24 @@ upload.get('/preview/:key{.*}', authMiddleware as any, async (c) => {
 // POST /api/upload - upload de imagem
 upload.post('/', async (c) => {
   const user = (c as any).get('user');
-  const formData = await c.req.formData();
-  const file = formData.get('file') as File | null;
-  const productId = formData.get('productId') as string | null;
+  const contentType = c.req.header('Content-Type') || '';
+  if (!/^multipart\/form-data(?:;|$)/i.test(contentType)) {
+    return c.json({ error: 'Envie a imagem por formulário multipart' }, 400);
+  }
+
+  let formData: FormData;
+  try {
+    formData = await c.req.formData();
+  } catch {
+    return c.json({ error: 'Formulário de upload inválido' }, 400);
+  }
+  const file = formData.get('file');
+  const requestedProduct = formData.get('productId');
+  if (requestedProduct !== null && (
+    typeof requestedProduct !== 'string' ||
+    !/^[a-z0-9_-]{1,128}$/i.test(requestedProduct)
+  )) return c.json({ error: 'Identificador de produto inválido' }, 400);
+  const productId = requestedProduct as string | null;
 
   if (!file || typeof file === 'string') return c.json({ error: 'Nenhum arquivo enviado' }, 400);
   if (file.size === 0) return c.json({ error: 'Arquivo vazio não pode ser enviado' }, 400);
