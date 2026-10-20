@@ -1,28 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import api from '../../lib/api';
+import { mergeStorageAuditPage, type StorageAuditPage, type StorageAuditProgress } from '../../lib/storageAuditProgress';
 import { Card, Badge, Button, Input, Select } from '../../components/ui/Button';
 import { ArrowLeft, Trash2, PauseCircle, PlayCircle, ExternalLink, UserPlus, Key, Eye, Copy, HardDrive } from 'lucide-react';
 import { toast } from 'sonner';
-
-type AuditResult = {
-  store_id: string;
-  mode: 'read_only';
-  quota: { recorded_used_mb: number; limit_mb: number };
-  scanned: {
-    objects: number; bytes: number; referenced: number; unreferenced: number;
-    older_than_7_days_for_review: number; unknown_upload_date: number;
-  };
-  review_candidates: { key: string; size_bytes: number; uploaded_at: string }[];
-  pagination: { has_more: boolean; next_cursor: string | null };
-  complete_store_scan: boolean;
-  reconciliation: {
-    is_complete_snapshot: boolean;
-    actual_r2_mb: number | null;
-    difference_mb: number | null;
-    automatic_adjustment: boolean;
-  };
-};
 
 export default function StoreDetail() {
   const { id } = useParams();
@@ -33,12 +15,15 @@ export default function StoreDetail() {
   const [edit, setEdit] = useState<any>(null);
   const [newAdmin, setNewAdmin] = useState({ name: '', email: '', password: '' });
   const [showAdminForm, setShowAdminForm] = useState(false);
-  const [audit, setAudit] = useState<{ storeId: string; result: AuditResult } | null>(null);
+  const [audit, setAudit] = useState<StorageAuditProgress | null>(null);
+  const auditProgressRef = useRef<StorageAuditProgress | null>(null);
   const [auditing, setAuditing] = useState(false);
   const auditController = useRef<AbortController | null>(null);
 
   const fetchStorageAudit = async (cursor?: string) => {
     if (!id) return;
+    if (cursor && (auditProgressRef.current?.storeId !== id ||
+        auditProgressRef.current?.nextCursor !== cursor)) return;
     auditController.current?.abort();
     const controller = new AbortController();
     auditController.current = controller;
@@ -48,9 +33,17 @@ export default function StoreDetail() {
         params: { limit: 100, ...(cursor ? { cursor } : {}) },
         signal: controller.signal
       });
-      if (!controller.signal.aborted) setAudit({ storeId: id, result: data });
+      if (controller.signal.aborted) return;
+      const next = mergeStorageAuditPage(
+        cursor ? auditProgressRef.current : null, data as StorageAuditPage, cursor
+      );
+      if (next.storeId !== id) throw new Error('Loja inesperada na auditoria');
+      auditProgressRef.current = next;
+      setAudit(next);
     } catch (err: any) {
-      if (!controller.signal.aborted) toast.error(err?.response?.data?.error || 'Não foi possível auditar o armazenamento');
+      if (!controller.signal.aborted) toast.error(
+        err?.response?.data?.error || 'Não foi possível auditar o armazenamento'
+      );
     } finally {
       if (auditController.current === controller) {
         auditController.current = null;
@@ -61,6 +54,7 @@ export default function StoreDetail() {
 
   useEffect(() => {
     setAudit(null);
+    auditProgressRef.current = null;
     setAuditing(false);
     return () => {
       auditController.current?.abort();
@@ -249,65 +243,65 @@ export default function StoreDetail() {
 
         {audit?.storeId === id && (
           <div className="mt-5 space-y-4">
+            <p className="text-xs text-gray-500">
+              {audit.pages} página(s) analisada(s) • {audit.complete ? 'Varredura finalizada' : 'Varredura parcial'}
+            </p>
             <div className="grid sm:grid-cols-3 gap-3 text-sm">
               <div className="border rounded-xl p-3 bg-gray-50">
                 <p className="text-gray-500">Uso registrado</p>
-                <p className="font-semibold">{audit.result.quota.recorded_used_mb.toFixed(2)} / {audit.result.quota.limit_mb} MB</p>
+                <p className="font-semibold">{audit.recordedUsedMb.toFixed(2)} / {audit.limitMb} MB</p>
               </div>
               <div className="border rounded-xl p-3 bg-gray-50">
-                <p className="text-gray-500">Objetos nesta página</p>
-                <p className="font-semibold">{audit.result.scanned.objects} ({(audit.result.scanned.bytes / 1048576).toFixed(2)} MB)</p>
+                <p className="text-gray-500">Objetos analisados</p>
+                <p className="font-semibold">{audit.objects} ({(audit.bytes / 1048576).toFixed(2)} MB)</p>
               </div>
               <div className="border rounded-xl p-3 bg-gray-50">
                 <p className="text-gray-500">Candidatos à revisão</p>
-                <p className="font-semibold">{audit.result.scanned.older_than_7_days_for_review}</p>
+                <p className="font-semibold">{audit.reviewCandidatesCount}</p>
               </div>
             </div>
-            {audit.result.reconciliation.is_complete_snapshot && (
+            {audit.complete && (
               <p className="text-sm text-gray-600">
-                Armazenamento encontrado no R2: {(audit.result.reconciliation.actual_r2_mb ?? 0).toFixed(2)} MB.
-                Diferença estimada em relação ao contador: {(audit.result.reconciliation.difference_mb ?? 0).toFixed(4)} MB.
+                Estimativa de espaço encontrado no R2: {(audit.bytes / 1048576).toFixed(2)} MB.
+                Diferença estimada em relação ao contador: {(audit.differenceMb ?? 0).toFixed(4)} MB.
                 Nenhum ajuste foi aplicado.
               </p>
             )}
             <p className="text-sm text-gray-600">
-              {audit.result.scanned.referenced} arquivos referenciados e {audit.result.scanned.unreferenced} sem referência conhecida nesta página.
-              {audit.result.scanned.unknown_upload_date > 0 && ` ${audit.result.scanned.unknown_upload_date} sem data verificável.`}
+              {audit.referenced} arquivos referenciados e {audit.unreferenced} sem referência conhecida nas páginas analisadas.
+              {audit.unknownUploadDate > 0 && ` ${audit.unknownUploadDate} sem data verificável.`}
             </p>
-            {audit.result.review_candidates.length > 0 && (
+            {audit.reviewCandidates.length > 0 && (
               <div>
                 <p className="font-medium text-sm mb-2">Arquivos para revisão manual (mais de 7 dias)</p>
                 <div className="space-y-2 max-h-56 overflow-auto rounded-xl border p-3">
-                  {audit.result.review_candidates.slice(0, 10).map(candidate => (
+                  {audit.reviewCandidates.slice(0, 10).map(candidate => (
                     <div key={candidate.key} className="text-xs text-gray-600 break-all">
                       {candidate.key} — {(candidate.size_bytes / 1024).toFixed(1)} KB
                     </div>
                   ))}
-                  {audit.result.review_candidates.length > 10 && (
+                  {audit.reviewCandidatesCount > 10 && (
                     <p className="text-xs text-gray-500">
-                      Mais {audit.result.review_candidates.length - 10} arquivos nesta página.
+                      Outros {audit.reviewCandidatesCount - 10} candidatos identificados;
+                      esta tela mostra apenas os 10 primeiros.
                     </p>
                   )}
                 </div>
               </div>
             )}
             <p className="text-xs text-amber-700">
-              Arquivos sem referência podem pertencer a edições ainda não salvas. Não exclua nem
-              ajuste a cota apenas com base nesta auditoria.
+              Arquivos sem referência podem pertencer a edições ainda não salvas.
+              A listagem não é uma fotografia transacional: mudanças durante a
+              auditoria podem alterar os valores. Não exclua arquivos nem ajuste
+              cotas apenas com base nesta consulta.
             </p>
-            {audit.result.pagination.has_more ? (
-              <Button variant="outline" disabled={auditing || !audit.result.pagination.next_cursor}
+            {!audit.complete && audit.nextCursor ? (
+              <Button variant="outline" disabled={auditing}
                 loading={auditing}
-                onClick={() => {
-                  if (audit.result.pagination.next_cursor) {
-                    fetchStorageAudit(audit.result.pagination.next_cursor);
-                  }
-                }}>Próxima página de arquivos</Button>
+                onClick={() => fetchStorageAudit(audit.nextCursor!)}>Próxima página de arquivos</Button>
             ) : (
               <p className="text-xs text-gray-500">
-                {audit.result.complete_store_scan
-                  ? 'A listagem inteira da loja coube nesta página.'
-                  : 'Fim desta consulta paginada.'}
+                {audit.complete ? 'Todas as páginas disponíveis foram analisadas.' : 'Paginação indisponível.'}
               </p>
             )}
           </div>
