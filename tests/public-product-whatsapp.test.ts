@@ -27,7 +27,7 @@ describe('API pública: contato WhatsApp com endereço completo', () => {
     expect(message).not.toContain('Link: /loja/');
   });
 
-  it.each(['12345', '', '00000000000', 'abc', null])
+  it.each(['12345', '', '00000000000', 'abc', '+55 73 99999 8888 <script>', '55-73-99999-8888?next=bad', null])
   ('retorna contato indisponível para número inválido: %s', async phone => {
     expect(await productContact(phone)).toBeNull();
   });
