@@ -5,9 +5,10 @@ import { auditStoreStorage, validateStorageAuditOptions } from '../backend/src/u
 let f: ReturnType<typeof fixture> | undefined;
 afterEach(() => { f?.db.close(); f = undefined; });
 
-const old = new Date('2026-08-01T12:00:00.000Z');
-const recent = new Date('2026-10-19T12:00:00.000Z');
-const now = new Date('2026-10-20T12:00:00.000Z');
+// As idades são relativas ao relógio do teste, não a uma data fixa:
+// o mesmo teste continua válido após a data de criação do projeto.
+const old = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+const recent = new Date(Date.now() - 24 * 60 * 60 * 1000);
 const key = (name: string, store = 'a') => `stores/${store}/products/general/${name}.png`;
 const url = (name: string) => '/api/storage/' + encodeURIComponent(key(name));
 const object = (name: string, uploaded: Date = old, store = 'a') => ({
