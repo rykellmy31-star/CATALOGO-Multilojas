@@ -76,10 +76,26 @@ export default function Banners() {
     }
   };
 
+  const bannerTimestamp = (value: string | null | undefined) => {
+    if (!value) return null;
+    // Datas legadas SQL sem offset foram gravadas em UTC.
+    const normalized = /^\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2}$/.test(value)
+      ? value.replace(' ', 'T') + 'Z' : value;
+    const parsed = new Date(normalized);
+    return Number.isFinite(parsed.getTime()) ? parsed : null;
+  };
   const displaySchedule = (value: string | null) => {
     if (!value) return 'Sem limite';
-    const parsed = new Date(value);
-    return Number.isFinite(parsed.getTime()) ? parsed.toLocaleString('pt-BR') : value;
+    return bannerTimestamp(value)?.toLocaleString('pt-BR') || 'Data inválida';
+  };
+  const bannerStatus = (banner: any) => {
+    if (!banner.is_active) return 'Desabilitado';
+    const now = Date.now();
+    const begins = bannerTimestamp(banner.starts_at)?.getTime();
+    const expires = bannerTimestamp(banner.ends_at)?.getTime();
+    if (begins !== undefined && begins > now) return 'Agendado';
+    if (expires !== undefined && expires <= now) return 'Encerrado';
+    return 'Em exibição';
   };
 
   const handleDelete = async (id: string) => {
@@ -185,7 +201,7 @@ export default function Banners() {
               </div>
               <div className="p-3 flex items-center justify-between text-xs text-gray-500">
                 <div className="space-y-1">
-                  <span>{b.position} • {b.is_active ? 'Habilitado' : 'Desabilitado'}</span>
+                  <span>{b.position} • {bannerStatus(b)}</span>
                   <p>Início: {displaySchedule(b.starts_at)} • Fim: {displaySchedule(b.ends_at)}</p>
                 </div>
                 <div className="flex items-center gap-3">
