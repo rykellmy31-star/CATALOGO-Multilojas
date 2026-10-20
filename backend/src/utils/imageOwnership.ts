@@ -18,9 +18,18 @@ export function isOwnedStorageImageUrl(url: string, storeId: string): boolean {
     try { external = new URL(url); }
     catch { return false; }
     if (!['https:', 'http:'].includes(external.protocol) ||
-        external.username || external.password ||
-        external.pathname === '/api/storage' ||
-        external.pathname.startsWith(prefix)) return false;
+        external.username || external.password) return false;
+    // Proxies podem decodificar uma ou mais camadas de %xx antes de
+    // encaminhar a rota. Nunca aceitar R2 privado via URL absoluta.
+    let pathname = external.pathname;
+    for (let depth = 0; depth < 3; depth++) {
+      if (pathname === '/api/storage' || pathname.startsWith(prefix)) return false;
+      let decoded: string;
+      try { decoded = decodeURIComponent(pathname); }
+      catch { return false; }
+      if (decoded === pathname) break;
+      pathname = decoded;
+    }
     return true;
   }
 
