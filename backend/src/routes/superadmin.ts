@@ -250,11 +250,21 @@ superadmin.post('/stores/:id/admins', zValidator('json', storeAdminSchema), asyn
   const hash = await hashPassword(password);
   const userId = crypto.randomUUID();
 
-  // A restrição UNIQUE cobre o intervalo entre a consulta e a inserção.
-  const inserted = await c.env.DB.prepare(
-    'INSERT INTO users (id, name, email, password_hash, role, store_id) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(email) DO NOTHING'
-  ).bind(userId, name, email, hash, 'store_admin', storeId).run();
-  if (inserted.meta?.changes !== 1) return c.json({ error: 'Email já cadastrado' }, 409);
+  // Verificar o status da loja NO INSERT evita cadastrar usuário após uma
+  // exclusão concorrente. UNIQUE(email) mantém a idempotência da colisão.
+  const inserted = await c.env.DB.prepare(`
+    INSERT INTO users (id, name, email, password_hash, role, store_id)
+    SELECT ?, ?, ?, ?, 'store_admin', s.id
+    FROM stores s WHERE s.id = ? AND s.status != 'deleted'
+    ON CONFLICT(email) DO NOTHING
+  `).bind(userId, name, email, hash, storeId).run();
+  if (inserted.meta?.changes !== 1) {
+    const stillAvailable = await c.env.DB.prepare(
+      "SELECT id FROM stores WHERE id = ? AND status != 'deleted'"
+    ).bind(storeId).first();
+    if (!stillAvailable) return c.json({ error: 'Loja não encontrada' }, 404);
+    return c.json({ error: 'Email já cadastrado' }, 409);
+  }
 
   const user = c.get('user');
   await c.env.DB.prepare(
