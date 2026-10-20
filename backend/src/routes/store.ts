@@ -75,7 +75,13 @@ store.get('/dashboard', async (c) => {
   const topProducts = await db.prepare(`
     SELECT p.id, p.name, p.slug, p.views, p.clicks, pi.url as image
     FROM products p
-    LEFT JOIN product_images pi ON pi.product_id = p.id AND pi.store_id = p.store_id AND pi.is_primary = 1
+    LEFT JOIN product_images pi ON pi.id = (
+      SELECT chosen.id FROM product_images AS chosen
+      WHERE chosen.product_id = p.id AND chosen.store_id = p.store_id
+        AND chosen.is_primary = 1
+      ORDER BY chosen.sort_order, chosen.created_at, chosen.id
+      LIMIT 1
+    )
     WHERE p.store_id = ? ORDER BY p.views DESC LIMIT 5
   `).bind(storeId).all();
 
