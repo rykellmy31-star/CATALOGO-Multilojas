@@ -3,6 +3,7 @@ import { authMiddleware, requireRole } from '../middleware/auth.js';
 import { zValidator } from '../middleware/validation.js';
 import { createProductSchema, createCategorySchema, createBrandSchema, createBannerSchema, publicLinkSchema, aiGenerateSchema, updateStoreSettingsSchema } from '../utils/validation.js';
 import { slugify } from '../utils/slug.js';
+import { isValidBannerSchedule } from '../utils/bannerSchedule.js';
 import { parsePublicSearch, escapePublicLike } from '../utils/publicSearch.js';
 import { resolveAIInputImage } from '../utils/aiImage.js';
 import { isOwnedStorageImageUrl, areOwnedStorageImages } from '../utils/imageOwnership.js';
@@ -708,17 +709,30 @@ store.get('/banners', async (c) => {
   return c.json({ banners: (banners as any).results || banners });
 });
 
+
 store.post('/banners', zValidator('json', createBannerSchema), async (c) => {
   const storeId = getStoreId(c);
   const data = c.req.valid('json');
-  if (!await validRelations(c, data, storeId)) return c.json({ error: 'Referência não pertence à loja' }, 400);
   if (!isOwnedStorageImageUrl(data.image_url, storeId)) {
     return c.json({ error: 'Imagem não pertence à loja' }, 400);
   }
+  if (!isValidBannerSchedule(data.starts_at, data.ends_at)) {
+    return c.json({ error: 'O término do banner precisa ser posterior ao início' }, 400);
+  }
   const id = crypto.randomUUID();
-  await c.env.DB.prepare('INSERT INTO banners (id, store_id, title, subtitle, image_url, link_url, button_text, position, is_active, sort_order) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').bind(id, storeId, data.title || null, data.subtitle || null, data.image_url, data.link_url || null, data.button_text || null, data.position || 'hero', data.is_active ? 1 : 0, data.sort_order || 0).run();
-  const banner = await c.env.DB.prepare('SELECT * FROM banners WHERE id = ? AND store_id = ?').bind(id, storeId).first();
-  if (!banner) return c.json({ error: 'Recurso não encontrado' }, 404);
+  await c.env.DB.prepare(`
+    INSERT INTO banners
+      (id, store_id, title, subtitle, image_url, link_url, button_text,
+       position, is_active, sort_order, starts_at, ends_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).bind(
+    id, storeId, data.title || null, data.subtitle || null, data.image_url,
+    data.link_url || null, data.button_text || null, data.position,
+    data.is_active ? 1 : 0, data.sort_order ?? 0,
+    data.starts_at || null, data.ends_at || null
+  ).run();
+  const banner = await c.env.DB.prepare('SELECT * FROM banners WHERE id = ? AND store_id = ?')
+    .bind(id, storeId).first();
   return c.json({ banner, message: 'Banner criado!' }, 201);
 });
 
@@ -726,28 +740,55 @@ store.put('/banners/:id', zValidator('json', createBannerSchema.partial()), asyn
   const storeId = getStoreId(c);
   const id = c.req.param('id');
   const data = c.req.valid('json');
-  if (!await validRelations(c, data, storeId)) return c.json({ error: 'Referência não pertence à loja' }, 400);
+  const existing = await c.env.DB.prepare(
+    'SELECT starts_at, ends_at FROM banners WHERE id = ? AND store_id = ?'
+  ).bind(id, storeId).first() as { starts_at: string | null; ends_at: string | null } | null;
+  if (!existing) return c.json({ error: 'Banner não encontrado' }, 404);
+
   if (data.image_url !== undefined && !isOwnedStorageImageUrl(data.image_url, storeId)) {
     return c.json({ error: 'Imagem não pertence à loja' }, 400);
   }
+  const start = data.starts_at !== undefined ? data.starts_at : existing.starts_at;
+  const end = data.ends_at !== undefined ? data.ends_at : existing.ends_at;
+  if (!isValidBannerSchedule(start, end)) {
+    return c.json({ error: 'O término do banner precisa ser posterior ao início' }, 400);
+  }
+
   const updates: string[] = [];
   const params: any[] = [];
-  const fields = ['title','subtitle','image_url','link_url','button_text','position','sort_order'];
-  for (const f of fields as Extract<keyof typeof data, string>[]) if (data[f] !== undefined) { updates.push(`${f} = ?`); params.push(data[f]); }
-  if (data.is_active !== undefined) { updates.push('is_active = ?'); params.push(data.is_active ? 1 : 0); }
-  if (updates.length === 0) return c.json({ error: 'Nenhum campo' }, 400);
+  const fields = [
+    'title', 'subtitle', 'image_url', 'link_url', 'button_text', 'position',
+    'sort_order', 'starts_at', 'ends_at'
+  ] as const;
+  for (const field of fields) {
+    if (data[field] !== undefined) {
+      updates.push(`${field} = ?`);
+      params.push(data[field]);
+    }
+  }
+  if (data.is_active !== undefined) {
+    updates.push('is_active = ?');
+    params.push(data.is_active ? 1 : 0);
+  }
+  if (!updates.length) return c.json({ error: 'Nenhum campo para atualizar' }, 400);
   updates.push("updated_at = datetime('now')");
   params.push(id, storeId);
-  await c.env.DB.prepare(`UPDATE banners SET ${updates.join(', ')} WHERE id = ? AND store_id = ?`).bind(...params).run();
-  const banner = await c.env.DB.prepare('SELECT * FROM banners WHERE id = ? AND store_id = ?').bind(id, storeId).first();
-  if (!banner) return c.json({ error: 'Recurso não encontrado' }, 404);
+  const result = await c.env.DB.prepare(
+    `UPDATE banners SET ${updates.join(', ')} WHERE id = ? AND store_id = ?`
+  ).bind(...params).run();
+  if (result.meta?.changes !== 1) return c.json({ error: 'Banner não encontrado' }, 404);
+  const banner = await c.env.DB.prepare('SELECT * FROM banners WHERE id = ? AND store_id = ?')
+    .bind(id, storeId).first();
   return c.json({ banner, message: 'Banner atualizado!' });
 });
 
 store.delete('/banners/:id', async (c) => {
   const storeId = getStoreId(c);
   const id = c.req.param('id');
-  await c.env.DB.prepare('DELETE FROM banners WHERE id = ? AND store_id = ?').bind(id, storeId).run();
+  const result = await c.env.DB.prepare(
+    'DELETE FROM banners WHERE id = ? AND store_id = ?'
+  ).bind(id, storeId).run();
+  if (result.meta?.changes !== 1) return c.json({ error: 'Banner não encontrado' }, 404);
   return c.json({ message: 'Banner removido' });
 });
 
