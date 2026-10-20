@@ -5,7 +5,7 @@ const require = createRequire(import.meta.url);
 const ts = require('typescript') as typeof import('typescript');
 
 const source = readFileSync(new URL('../frontend/src/pages/PublicCatalog/ProductDetail.tsx', import.meta.url), 'utf8');
-const excerpt = source.split('  const handleWhatsApp = () => {')[0] +
+const excerpt = source.split('  const trackWhatsAppClick = () => {')[0] +
   '  return { data, loading, selectedImage, showShare, routeKey };\n}\n';
 const compiled = ts.transpileModule(excerpt, {
   fileName: 'ProductDetail.tsx', reportDiagnostics: true,
