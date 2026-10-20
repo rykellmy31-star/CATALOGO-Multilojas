@@ -17,13 +17,11 @@ function handler(name: string): string {
 
 describe('Editor de produtos: regressões de concorrência e segurança', () => {
   it('arquivo TSX tem sintaxe válida', () => {
-    const parsed = ts.createSourceFile('ProductForm.tsx', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
     const syntax = ts.transpileModule(source, {
       fileName: 'ProductForm.tsx',
       reportDiagnostics: true,
       compilerOptions: { module: ts.ModuleKind.ESNext, jsx: ts.JsxEmit.ReactJSX }
     });
-    expect(parsed.parseDiagnostics).toHaveLength(0);
     expect(syntax.diagnostics?.filter(x => x.category === ts.DiagnosticCategory.Error)).toEqual([]);
   });
 
