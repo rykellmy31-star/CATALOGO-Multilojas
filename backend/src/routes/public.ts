@@ -27,8 +27,10 @@ publicRoutes.get('/stores/:slug', async (c) => {
   if (!store) return c.json({ error: 'Loja não encontrada' }, 404);
 
   // Banners ativos
-  const banners = await loadVisibleBanners(c.env.DB, store.id);
+  // Calcular primeiro a próxima troca: se uma janela virar entre as duas
+  // consultas, o navegador ainda poderá atualizar o estado logo em seguida.
   const nextTransitionAt = await nextBannerTransitionAt(c.env.DB, store.id);
+  const banners = await loadVisibleBanners(c.env.DB, store.id);
   
   // Categorias
   const categories = await c.env.DB.prepare('SELECT * FROM categories WHERE store_id = ? AND is_active = 1 ORDER BY sort_order, name').bind(store.id).all();
@@ -91,8 +93,10 @@ publicRoutes.get('/stores/:slug/banners', async (c) => {
     "SELECT id FROM stores WHERE slug = ? AND status = 'active'"
   ).bind(c.req.param('slug')).first() as { id: string } | null;
   if (!store) return c.json({ error: 'Loja não encontrada' }, 404);
-  const banners = await loadVisibleBanners(c.env.DB, store.id);
+  // Calcular primeiro a próxima troca: se uma janela virar entre as duas
+  // consultas, o navegador ainda poderá atualizar o estado logo em seguida.
   const nextTransitionAt = await nextBannerTransitionAt(c.env.DB, store.id);
+  const banners = await loadVisibleBanners(c.env.DB, store.id);
   c.header('Cache-Control', 'no-store');
   return c.json({ banners, next_transition_at: nextTransitionAt });
 });
