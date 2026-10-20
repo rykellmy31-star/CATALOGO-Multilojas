@@ -212,13 +212,32 @@ store.post('/products', zValidator('json', createProductSchema), async (c) => {
     return c.env.DB.batch(statements);
   };
 
-  const initialResults = await createBatch(slug);
-  if (initialResults[0]?.meta?.changes === 0) {
-    slug = `${baseSlug}-${productId}`;
-    const retryResults = await createBatch(slug);
-    if (retryResults[0]?.meta?.changes === 0) {
-      return c.json({ error: 'Não foi possível gerar endereço único' }, 409);
+  // Informar conflito de SKU antes de inserir, sem vazar produtos de outra loja.
+  // A restrição UNIQUE continua protegendo também requisições simultâneas.
+  if (data.sku) {
+    const taken = await c.env.DB.prepare(
+      'SELECT id FROM products WHERE store_id = ? AND sku = ?'
+    ).bind(storeId, data.sku).first();
+    if (taken) return c.json({ error: 'SKU já utilizado nesta loja' }, 409);
+  }
+
+  try {
+    const initialResults = await createBatch(slug);
+    if (initialResults[0]?.meta?.changes === 0) {
+      slug = `${baseSlug}-${productId}`;
+      const retryResults = await createBatch(slug);
+      if (retryResults[0]?.meta?.changes === 0) {
+        return c.json({ error: 'Não foi possível gerar endereço único' }, 409);
+      }
     }
+  } catch (error) {
+    // Em uma corrida, o SKU pode ser ocupado após a verificação inicial.
+    // D1.batch reverte produto e imagens, preservando a atomicidade.
+    const reason = String(error);
+    if (data.sku && /UNIQUE constraint failed:\\s*products\\.store_id,\\s*products\\.sku/i.test(reason)) {
+      return c.json({ error: 'SKU já utilizado nesta loja' }, 409);
+    }
+    throw error;
   }
 
   await c.env.DB.prepare(
