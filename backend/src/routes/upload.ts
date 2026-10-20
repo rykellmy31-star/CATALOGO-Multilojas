@@ -204,7 +204,12 @@ upload.get('/storage/:key{.*}', async (c) => {
   const image = await c.env.DB.prepare("SELECT pi.id FROM product_images pi JOIN products p ON pi.product_id = p.id AND pi.store_id = p.store_id JOIN stores s ON p.store_id = s.id WHERE pi.url = ? AND p.status = 'published' AND s.status = 'active' AND pi.store_id = ?").bind(`/api/storage/${encodeURIComponent(key)}`, key.split('/')[1]).first();
   const url = `/api/storage/${encodeURIComponent(key)}`;
   const branding = image ? null : await c.env.DB.prepare(`SELECT id FROM stores WHERE status = 'active' AND id = ? AND (logo_url = ? OR banner_url = ?)
-    UNION ALL SELECT b.id FROM banners b JOIN stores s ON b.store_id = s.id WHERE b.store_id = ? AND b.image_url = ? AND b.is_active = 1 AND s.status = 'active'`).bind(key.split('/')[1], url, url, key.split('/')[1], url).first();
+    UNION ALL SELECT b.id FROM banners b
+      JOIN stores s ON b.store_id = s.id
+      WHERE b.store_id = ? AND b.image_url = ? AND b.is_active = 1
+        AND s.status = 'active'
+        AND (b.starts_at IS NULL OR julianday(b.starts_at) <= julianday('now'))
+        AND (b.ends_at IS NULL OR julianday(b.ends_at) > julianday('now'))`).bind(key.split('/')[1], url, url, key.split('/')[1], url).first();
   if (!image && !branding) return c.json({ error: 'Arquivo não encontrado' }, 404);
   try {
     const obj = await c.env.STORAGE.get(key);
