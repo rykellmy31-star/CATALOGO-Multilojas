@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import api from '../../lib/api';
 import AdminImage from '../../components/AdminImage';
+import { createStoreSettingsPayload } from '../../lib/storeSettingsPayload';
 import { Card, Button, Input, Textarea } from '../../components/ui/Button';
 import { Save, Upload, ExternalLink, Palette } from 'lucide-react';
 import { toast } from 'sonner';
@@ -25,7 +26,7 @@ export default function Settings() {
     }
     savingRef.current = true;
     setSaving(true);
-    const submittedStore = { ...store };
+    const submittedStore = createStoreSettingsPayload(store);
     try {
       const { data } = await api.put('/store/settings', submittedStore);
       // Uma resposta antiga não pode apagar alterações feitas enquanto salvava.
