@@ -1,9 +1,22 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import api from '../../lib/api';
 import { Card, Badge, Button, Input, Select } from '../../components/ui/Button';
-import { ArrowLeft, Trash2, PauseCircle, PlayCircle, ExternalLink, UserPlus, Key, Eye, Copy } from 'lucide-react';
+import { ArrowLeft, Trash2, PauseCircle, PlayCircle, ExternalLink, UserPlus, Key, Eye, Copy, HardDrive } from 'lucide-react';
 import { toast } from 'sonner';
+
+type AuditResult = {
+  store_id: string;
+  mode: 'read_only';
+  quota: { recorded_used_mb: number; limit_mb: number };
+  scanned: {
+    objects: number; bytes: number; referenced: number; unreferenced: number;
+    older_than_7_days_for_review: number; unknown_upload_date: number;
+  };
+  review_candidates: { key: string; size_bytes: number; uploaded_at: string }[];
+  pagination: { has_more: boolean; next_cursor: string | null };
+  complete_store_scan: boolean;
+};
 
 export default function StoreDetail() {
   const { id } = useParams();
@@ -14,6 +27,39 @@ export default function StoreDetail() {
   const [edit, setEdit] = useState<any>(null);
   const [newAdmin, setNewAdmin] = useState({ name: '', email: '', password: '' });
   const [showAdminForm, setShowAdminForm] = useState(false);
+  const [audit, setAudit] = useState<{ storeId: string; result: AuditResult } | null>(null);
+  const [auditing, setAuditing] = useState(false);
+  const auditController = useRef<AbortController | null>(null);
+
+  const fetchStorageAudit = async (cursor?: string) => {
+    if (!id) return;
+    auditController.current?.abort();
+    const controller = new AbortController();
+    auditController.current = controller;
+    setAuditing(true);
+    try {
+      const { data } = await api.get(`/superadmin/stores/${id}/storage-audit`, {
+        params: { limit: 100, ...(cursor ? { cursor } : {}) },
+        signal: controller.signal
+      });
+      if (!controller.signal.aborted) setAudit({ storeId: id, result: data });
+    } catch (err: any) {
+      if (!controller.signal.aborted) toast.error(err?.response?.data?.error || 'Não foi possível auditar o armazenamento');
+    } finally {
+      if (auditController.current === controller) {
+        auditController.current = null;
+        setAuditing(false);
+      }
+    }
+  };
+
+  useEffect(() => {
+    setAudit(null);
+    return () => {
+      auditController.current?.abort();
+      auditController.current = null;
+    };
+  }, [id]);
 
   const fetchStore = async () => {
     try {
@@ -121,10 +167,10 @@ export default function StoreDetail() {
                 <option value="active">Ativa</option><option value="suspended">Suspensa</option><option value="pending">Pendente</option>
               </Select>
             </div>
-            <Input label="Limite Armazenamento (MB)" type="number" value={edit.storage_limit_mb || 1024} onChange={e=>setEdit({...edit, storage_limit_mb: parseInt(e.target.value)})} />
+            <Input label="Limite Armazenamento (MB)" type="number" value={edit.storage_limit_mb ?? 1024} onChange={e=>setEdit({...edit, storage_limit_mb: parseInt(e.target.value)})} />
             <div className="grid grid-cols-2 gap-4">
-              <Input label="Limite IA Diário" type="number" value={edit.ai_daily_limit || 10} onChange={e=>setEdit({...edit, ai_daily_limit: parseInt(e.target.value)})} />
-              <Input label="Limite IA Mensal" type="number" value={edit.ai_monthly_limit || 100} onChange={e=>setEdit({...edit, ai_monthly_limit: parseInt(e.target.value)})} />
+              <Input label="Limite IA Diário" type="number" value={edit.ai_daily_limit ?? 10} onChange={e=>setEdit({...edit, ai_daily_limit: parseInt(e.target.value)})} />
+              <Input label="Limite IA Mensal" type="number" value={edit.ai_monthly_limit ?? 100} onChange={e=>setEdit({...edit, ai_monthly_limit: parseInt(e.target.value)})} />
             </div>
             <div className="flex gap-2 pt-2">
               <Button onClick={handleSave}>Salvar Alterações</Button>
@@ -177,6 +223,82 @@ export default function StoreDetail() {
           </div>
         </Card>
       </div>
+
+      <Card className="p-6">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h3 className="font-semibold text-gray-900 flex items-center gap-2">
+              <HardDrive className="w-5 h-5 text-sky-600" /> Auditoria do armazenamento R2
+            </h3>
+            <p className="text-xs text-gray-600 mt-1">
+              Verificação manual, somente leitura. Nenhum arquivo será excluído e nenhuma cota será modificada.
+            </p>
+          </div>
+          <Button variant="outline" disabled={auditing} loading={auditing}
+            onClick={() => fetchStorageAudit()}>
+            {audit?.storeId === id ? 'Reiniciar auditoria' : 'Verificar arquivos'}
+          </Button>
+        </div>
+
+        {audit?.storeId === id && (
+          <div className="mt-5 space-y-4">
+            <div className="grid sm:grid-cols-3 gap-3 text-sm">
+              <div className="border rounded-xl p-3 bg-gray-50">
+                <p className="text-gray-500">Uso registrado</p>
+                <p className="font-semibold">{audit.result.quota.recorded_used_mb.toFixed(2)} / {audit.result.quota.limit_mb} MB</p>
+              </div>
+              <div className="border rounded-xl p-3 bg-gray-50">
+                <p className="text-gray-500">Objetos nesta página</p>
+                <p className="font-semibold">{audit.result.scanned.objects} ({(audit.result.scanned.bytes / 1048576).toFixed(2)} MB)</p>
+              </div>
+              <div className="border rounded-xl p-3 bg-gray-50">
+                <p className="text-gray-500">Candidatos à revisão</p>
+                <p className="font-semibold">{audit.result.scanned.older_than_7_days_for_review}</p>
+              </div>
+            </div>
+            <p className="text-sm text-gray-600">
+              {audit.result.scanned.referenced} arquivos referenciados e {audit.result.scanned.unreferenced} sem referência conhecida nesta página.
+              {audit.result.scanned.unknown_upload_date > 0 && ` ${audit.result.scanned.unknown_upload_date} sem data verificável.`}
+            </p>
+            {audit.result.review_candidates.length > 0 && (
+              <div>
+                <p className="font-medium text-sm mb-2">Arquivos para revisão manual (mais de 7 dias)</p>
+                <div className="space-y-2 max-h-56 overflow-auto rounded-xl border p-3">
+                  {audit.result.review_candidates.slice(0, 10).map(candidate => (
+                    <div key={candidate.key} className="text-xs text-gray-600 break-all">
+                      {candidate.key} — {(candidate.size_bytes / 1024).toFixed(1)} KB
+                    </div>
+                  ))}
+                  {audit.result.review_candidates.length > 10 && (
+                    <p className="text-xs text-gray-500">
+                      Mais {audit.result.review_candidates.length - 10} arquivos nesta página.
+                    </p>
+                  )}
+                </div>
+              </div>
+            )}
+            <p className="text-xs text-amber-700">
+              Arquivos sem referência podem pertencer a edições ainda não salvas. Não exclua nem
+              ajuste a cota apenas com base nesta auditoria.
+            </p>
+            {audit.result.pagination.has_more ? (
+              <Button variant="outline" disabled={auditing || !audit.result.pagination.next_cursor}
+                loading={auditing}
+                onClick={() => {
+                  if (audit.result.pagination.next_cursor) {
+                    fetchStorageAudit(audit.result.pagination.next_cursor);
+                  }
+                }}>Próxima página de arquivos</Button>
+            ) : (
+              <p className="text-xs text-gray-500">
+                {audit.result.complete_store_scan
+                  ? 'A listagem inteira da loja coube nesta página.'
+                  : 'Fim desta consulta paginada.'}
+              </p>
+            )}
+          </div>
+        )}
+      </Card>
     </div>
   );
 }
