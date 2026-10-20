@@ -67,6 +67,21 @@ describe('Editor de produtos: regressões de concorrência e segurança', () => 
     expect(generate).toContain('aiRequestEpochRef.current');
   });
 
+  it('reenvio da mesma imagem mantém UUID para não duplicar gerações de IA', () => {
+    const generate = handler('handleGenerateAI');
+    expect(generate).toContain('aiIdempotencyRef.current?.signature !== signature');
+    expect(generate).toContain('crypto.randomUUID()');
+    expect(generate).toContain('request_id: requestId');
+    expect(generate).toContain('status === 409');
+  });
+
+  it('a chave só é liberada após confirmação ou rejeição antes da geração', () => {
+    const generate = handler('handleGenerateAI');
+    expect(generate).toContain('aiIdempotencyRef.current = null');
+    expect(generate).toContain('[400, 403, 404, 413, 422, 429]');
+    expect(generate).toContain('histórico da IA');
+  });
+
   it('descarta resposta antiga depois de trocar de produto', () => {
     expect(source).toContain('aiRequestEpochRef.current++');
     expect(source).toContain('if (epoch !== aiRequestEpochRef.current) return');
