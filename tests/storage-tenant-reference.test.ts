@@ -28,6 +28,31 @@ describe('Isolamento de referências de imagens R2', () => {
     expect(isOwnedStorageImageUrl(url, 'a')).toBe(false);
   });
 
+  it.each([
+    'https://catalogo.example/api/storage/' + encodeURIComponent('stores/b/products/general/photo.jpg'),
+    'http://catalogo.example/api/storage/' + encodeURIComponent('stores/b/products/general/photo.jpg'),
+    'https://outro.example/api/storage/' + encodeURIComponent('stores/b/products/general/photo.jpg'),
+    'https://catalogo.example/api/storage',
+    'https://usuario:senha@example.com/foto.png',
+    'javascript:alert(1)',
+    'data:image/svg+xml,%3Csvg%3E',
+    '//outro.example/api/storage/stores/b/products/general/photo.jpg',
+    '/api/storage2/stores/b/products/general/photo.jpg',
+    '/qualquer/caminho/local',
+    'https://example.com/foto.jpg\\nX-Injected: 1'
+  ])('impede contornar o isolamento com URL absoluta ou esquema inseguro: %s', invalid => {
+    expect(isOwnedStorageImageUrl(invalid, 'a')).toBe(false);
+    expect(areOwnedStorageImages([invalid], 'a')).toBe(false);
+  });
+
+  it.each([
+    'https://example.com/legacy.jpg',
+    'http://example.com/legacy.png',
+    'https://cdn.example.com/assets/foto.webp?width=1024'
+  ])('mantém compatibilidade com imagens externas legadas: %s', valid => {
+    expect(isOwnedStorageImageUrl(valid, 'a')).toBe(true);
+  });
+
   it('preserva suporte a imagens externas importadas anteriormente', () => {
     expect(areOwnedStorageImages(['https://example.com/legacy.jpg'], 'a')).toBe(true);
   });
