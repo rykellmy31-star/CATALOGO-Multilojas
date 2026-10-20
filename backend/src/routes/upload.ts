@@ -90,12 +90,20 @@ upload.post('/', async (c) => {
 
   const arrayBuffer = await file.arrayBuffer();
   const bytes = new Uint8Array(arrayBuffer);
-  const validImage = file.type.includes('png') ? bytes[0] === 137 && bytes[1] === 80 && bytes[2] === 78 && bytes[3] === 71
-    : file.type.includes('webp') ? new TextDecoder().decode(bytes.slice(0,4)) === 'RIFF' && new TextDecoder().decode(bytes.slice(8,12)) === 'WEBP'
-    : file.type.includes('gif') ? new TextDecoder().decode(bytes.slice(0,3)) === 'GIF'
-    : bytes[0] === 255 && bytes[1] === 216 && bytes[2] === 255;
+  const mime = file.type === 'image/jpg' ? 'image/jpeg' : file.type;
+  // Comparar a assinatura completa: cabeçalhos parciais não são imagens válidas.
+  const png = [137, 80, 78, 71, 13, 10, 26, 10];
+  const validImage = mime === 'image/png'
+    ? bytes.length >= 8 && png.every((value, i) => bytes[i] === value)
+    : mime === 'image/webp'
+      ? bytes.length >= 12 &&
+        String.fromCharCode(...bytes.subarray(0, 4)) === 'RIFF' &&
+        String.fromCharCode(...bytes.subarray(8, 12)) === 'WEBP'
+      : mime === 'image/gif'
+        ? bytes.length >= 6 && /^GIF8[79]a$/.test(String.fromCharCode(...bytes.subarray(0, 6)))
+        : bytes.length >= 3 && bytes[0] === 255 && bytes[1] === 216 && bytes[2] === 255;
   if (!validImage) return c.json({ error: 'Conteúdo de imagem inválido' }, 400);
-  const ext = ({ 'image/jpeg': 'jpg', 'image/jpg': 'jpg', 'image/png': 'png', 'image/webp': 'webp', 'image/gif': 'gif' } as Record<string, string>)[file.type];
+  const ext = ({ 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp', 'image/gif': 'gif' } as Record<string, string>)[mime];
   // UUID criptográfico reduz colisões de uploads simultâneos.
   const key = `stores/${effectiveStoreId}/products/${productId || 'general'}/${crypto.randomUUID()}.${ext}`;
 
