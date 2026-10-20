@@ -2,6 +2,7 @@ import { test } from 'vitest';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { runInNewContext } from 'node:vm';
+import { webcrypto } from 'node:crypto';
 import ts from 'typescript';
 
 const source = readFileSync(new URL('../frontend/src/lib/api.ts', import.meta.url), 'utf8');
@@ -29,6 +30,7 @@ function fixture(token?: string, pathname = '/admin') {
   const module = { exports: {} };
   runInNewContext(compiled, {
     module, exports: module.exports, storage, localStorage: storage, window, Intl, Date, Math, Promise,
+    crypto: webcrypto,
     require: (name: string) => {
       if (name === 'axios') return { __esModule: true, default: axios };
       throw new Error(`Import inesperado: ${name}`);
