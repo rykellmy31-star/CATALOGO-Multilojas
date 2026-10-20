@@ -206,7 +206,7 @@ store.post('/products', zValidator('json', createProductSchema), async (c) => {
 
   const createBatch = (candidateSlug: string) => {
     const statements: D1PreparedStatement[] = [insertProduct(candidateSlug)];
-    for (const [index, url] of (data.images || []).entries()) {
+    for (const [index, url] of [...new Set(data.images || [])].entries()) {
       // Marcar imagens de IA somente quando pertencem a uma geração concluída
       // da MESMA loja. Produto e imagens continuam no mesmo batch D1.
       statements.push(c.env.DB.prepare(`
@@ -366,9 +366,25 @@ store.put('/products/:id', zValidator('json', createProductSchema.partial()), as
           'UPDATE product_images SET sort_order = ?, is_primary = ? WHERE id = ? AND product_id = ? AND store_id = ?'
         ).bind(i, i === 0 ? 1 : 0, imageId, id, storeId));
       } else {
-        statements.push(c.env.DB.prepare(
-          'INSERT INTO product_images (id, product_id, store_id, url, is_primary, sort_order) VALUES (?, ?, ?, ?, ?, ?)'
-        ).bind(crypto.randomUUID(), id, storeId, url, i === 0 ? 1 : 0, i));
+        // Reconhecer a geração já concluída da mesma loja mesmo ao adicionar
+        // a foto somente durante a edição; nunca confiar em flags do cliente.
+        statements.push(c.env.DB.prepare(`
+          INSERT INTO product_images
+            (id, product_id, store_id, url, is_primary, sort_order, is_ai_generated, ai_style)
+          SELECT ?, p.id, p.store_id, ?, ?, ?,
+            CASE WHEN g.id IS NULL THEN 0 ELSE 1 END,
+            CASE WHEN g.ai_style IN ('modern_room', 'white_background', 'promotional', 'premium_catalog')
+              THEN g.ai_style ELSE NULL END
+          FROM products AS p
+          LEFT JOIN ai_generations AS g ON g.id = (
+            SELECT gen.id FROM ai_generations AS gen
+            WHERE gen.store_id = p.store_id AND gen.status = 'completed'
+              AND gen.generated_image_url = ?
+            ORDER BY gen.completed_at DESC, gen.created_at DESC, gen.id DESC
+            LIMIT 1
+          )
+          WHERE p.id = ? AND p.store_id = ?
+        `).bind(crypto.randomUUID(), url, i === 0 ? 1 : 0, i, url, id, storeId));
       }
     }
   }
