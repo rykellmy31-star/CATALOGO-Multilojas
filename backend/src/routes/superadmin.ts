@@ -5,6 +5,7 @@ import { zValidator } from '../middleware/validation.js';
 import { createStoreSchema, storeAdminSchema, updatePlatformConfigSchema } from '../utils/validation.js';
 import { hashPassword } from '../utils/hash.js';
 import { slugify } from '../utils/slug.js';
+import { parsePublicSearch, escapePublicLike } from '../utils/publicSearch.js';
 import { auditStoreStorage, validateStorageAuditOptions } from '../utils/storageAudit.js';
 
 type Env = {
@@ -51,7 +52,9 @@ superadmin.get('/dashboard', async (c) => {
 
 // GET /api/superadmin/stores
 superadmin.get('/stores', async (c) => {
-  const q = c.req.query('q');
+  const search = parsePublicSearch(c.req.query('q'));
+  if (!search.valid) return c.json({ error: 'Busca inválida' }, 400);
+  const qLike = search.term ? escapePublicLike(search.term) : undefined;
   const status = c.req.query('status');
   
   let query = `
@@ -63,9 +66,9 @@ superadmin.get('/stores', async (c) => {
   `;
   const params: any[] = [];
 
-  if (q) {
-    query += ' AND (s.name LIKE ? OR s.slug LIKE ? OR s.email LIKE ?)';
-    params.push(`%${q}%`, `%${q}%`, `%${q}%`);
+  if (qLike) {
+    query += " AND (s.name LIKE ? ESCAPE '\\' OR s.slug LIKE ? ESCAPE '\\' OR s.email LIKE ? ESCAPE '\\')";
+    params.push(qLike, qLike, qLike);
   }
   if (status && status !== 'all') {
     query += ' AND s.status = ?';
