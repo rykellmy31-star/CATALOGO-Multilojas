@@ -58,6 +58,27 @@ describe('Cadastro atômico multiempresa', () => {
     expect(count('product_images')).toBe(0);
   });
 
+  it('aceita SKU igual ao de outra loja, mantendo isolamento', async () => {
+    f = fixture();
+    f.db.prepare("UPDATE products SET sku = 'LOJA-B' WHERE id = 'pb'").run();
+    const result = await create({ name: 'SKU repetido só fora da loja', price: 15, sku: 'LOJA-B' });
+    expect(result.status).toBe(201);
+    const { product } = await result.json() as any;
+    expect(product.store_id).toBe('a');
+    expect((f.db.prepare("SELECT sku FROM products WHERE id = 'pb'").get() as any).sku).toBe('LOJA-B');
+  });
+
+  it('duas requisições simultâneas com mesmo SKU não criam duplicatas', async () => {
+    f = fixture();
+    const [a, b] = await Promise.all([
+      create({ name: 'Primeiro lote', price: 15, sku: 'SKU-CONCORRENTE', images }),
+      create({ name: 'Segundo lote', price: 15, sku: 'SKU-CONCORRENTE', images })
+    ]);
+    expect([a.status, b.status].sort()).toEqual([201, 409]);
+    expect((f.db.prepare("SELECT COUNT(*) AS n FROM products WHERE store_id = 'a' AND sku = 'SKU-CONCORRENTE'").get() as any).n).toBe(1);
+    expect((f.db.prepare("SELECT COUNT(*) AS n FROM product_images WHERE store_id = 'a'").get() as any).n).toBe(2);
+  });
+
   it('permite produto sem imagem', async () => {
     f = fixture();
     const response = await create({ name: 'Sem imagem', price: 0 });
