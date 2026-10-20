@@ -30,6 +30,7 @@ export default function ProductForm() {
   const galleryUploadingRef = useRef(false);
   const galleryControllerRef = useRef<AbortController | null>(null);
   const aiGeneratingRef = useRef(false);
+  const aiRequestEpochRef = useRef(0);
   const applyingAIRef = useRef(false);
   const aiUploadRef = useRef<{ sequence: number; pending: boolean; controller: AbortController | null }>({
     sequence: 0, pending: false, controller: null
@@ -54,6 +55,18 @@ export default function ProductForm() {
 
   useEffect(() => {
     const controller = new AbortController();
+    // Troca de produto invalida requisições pendentes e resultados da IA anterior.
+    aiRequestEpochRef.current++;
+    galleryControllerRef.current?.abort();
+    galleryControllerRef.current = null;
+    galleryUploadingRef.current = false;
+    const aiUpload = aiUploadRef.current;
+    aiUpload.sequence++;
+    aiUpload.controller?.abort();
+    aiUpload.controller = null;
+    aiUpload.pending = false;
+    setUploading(false);
+    setAiUploading(false);
     setLoadedProductId(null);
     setImages([]);
     setExistingImages([]);
@@ -257,11 +270,13 @@ export default function ProductForm() {
     if (!aiImage) return toast.error('Envie uma imagem primeiro');
     if (aiGeneratingRef.current) return;
     aiGeneratingRef.current = true;
+    const epoch = aiRequestEpochRef.current;
     setAiLoading(true);
     setAiError('');
     setAiResult(null);
     try {
       const { data } = await api.post('/store/ai/generate', { image_url: aiImage, style: aiStyle, product_id: id || undefined });
+      if (epoch !== aiRequestEpochRef.current) return;
       setAiResult(data.generation);
       if (data.generation?.imageError) {
         setAiError(data.generation.imageError);
@@ -270,6 +285,7 @@ export default function ProductForm() {
         toast.success('Geração concluída! Revise os dados.');
       }
     } catch (err: any) {
+      if (epoch !== aiRequestEpochRef.current) return;
       const msg = err.response?.data?.message || err.response?.data?.error || 'Erro ao gerar';
       setAiError(msg);
       if (err.response?.status === 503) {
