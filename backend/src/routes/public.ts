@@ -35,8 +35,8 @@ publicRoutes.get('/stores/:slug', async (c) => {
   const featured = await c.env.DB.prepare(`
     SELECT p.id, p.store_id, p.sku, p.name, p.slug, p.short_description, p.description, p.price, p.original_price, p.promotional_price, p.category_id, p.brand_id, p.status, p.is_featured, p.is_on_sale, p.stock_quantity, p.dimensions, p.technical_specs, p.variations, pi.url as primary_image, c.name as category_name
     FROM products p
-    LEFT JOIN product_images pi ON pi.product_id = p.id AND pi.is_primary = 1
-    LEFT JOIN categories c ON p.category_id = c.id
+    LEFT JOIN product_images pi ON pi.product_id = p.id AND pi.store_id = p.store_id AND pi.is_primary = 1
+    LEFT JOIN categories c ON p.category_id = c.id AND c.store_id = p.store_id
     WHERE p.store_id = ? AND p.status = 'published' AND p.is_featured = 1
     ORDER BY p.sort_order, p.created_at DESC LIMIT 8
   `).bind(store.id).all();
@@ -45,8 +45,8 @@ publicRoutes.get('/stores/:slug', async (c) => {
   const onSale = await c.env.DB.prepare(`
     SELECT p.id, p.store_id, p.sku, p.name, p.slug, p.short_description, p.description, p.price, p.original_price, p.promotional_price, p.category_id, p.brand_id, p.status, p.is_featured, p.is_on_sale, p.stock_quantity, p.dimensions, p.technical_specs, p.variations, pi.url as primary_image, c.name as category_name
     FROM products p
-    LEFT JOIN product_images pi ON pi.product_id = p.id AND pi.is_primary = 1
-    LEFT JOIN categories c ON p.category_id = c.id
+    LEFT JOIN product_images pi ON pi.product_id = p.id AND pi.store_id = p.store_id AND pi.is_primary = 1
+    LEFT JOIN categories c ON p.category_id = c.id AND c.store_id = p.store_id
     WHERE p.store_id = ? AND p.status = 'published' AND p.is_on_sale = 1
     ORDER BY p.created_at DESC LIMIT 8
   `).bind(store.id).all();
@@ -92,8 +92,8 @@ publicRoutes.get('/stores/:slug/products', async (c) => {
   let query = `
     SELECT p.id, p.store_id, p.sku, p.name, p.slug, p.short_description, p.description, p.price, p.original_price, p.promotional_price, p.category_id, p.brand_id, p.status, p.is_featured, p.is_on_sale, p.stock_quantity, p.dimensions, p.technical_specs, p.variations, pi.url as primary_image, c.name as category_name, c.slug as category_slug
     FROM products p
-    LEFT JOIN product_images pi ON pi.product_id = p.id AND pi.is_primary = 1
-    LEFT JOIN categories c ON p.category_id = c.id
+    LEFT JOIN product_images pi ON pi.product_id = p.id AND pi.store_id = p.store_id AND pi.is_primary = 1
+    LEFT JOIN categories c ON p.category_id = c.id AND c.store_id = p.store_id
     WHERE p.store_id = ? AND p.status = 'published'
   `;
   const params: any[] = [store.id];
@@ -133,7 +133,7 @@ publicRoutes.get('/stores/:slug/products', async (c) => {
   const products = await c.env.DB.prepare(query).bind(...params).all();
 
   // Count
-  let countQuery = `SELECT COUNT(*) as count FROM products p LEFT JOIN categories c ON p.category_id = c.id WHERE p.store_id = ? AND p.status = 'published'`;
+  let countQuery = `SELECT COUNT(*) as count FROM products p LEFT JOIN categories c ON p.category_id = c.id AND c.store_id = p.store_id WHERE p.store_id = ? AND p.status = 'published'`;
   const countParams: any[] = [store.id];
   if (qLike) {
     countQuery += " AND (p.name LIKE ? ESCAPE '\\' OR p.description LIKE ? ESCAPE '\\' OR p.sku LIKE ? ESCAPE '\\' OR p.short_description LIKE ? ESCAPE '\\')";
@@ -163,19 +163,19 @@ publicRoutes.get('/stores/:slug/products/:productSlug', async (c) => {
   const product = await c.env.DB.prepare(`
     SELECT p.id, p.store_id, p.sku, p.name, p.slug, p.short_description, p.description, p.price, p.original_price, p.promotional_price, p.category_id, p.brand_id, p.status, p.is_featured, p.is_on_sale, p.stock_quantity, p.views, p.dimensions, p.technical_specs, p.variations, c.name as category_name, c.slug as category_slug, b.name as brand_name
     FROM products p
-    LEFT JOIN categories c ON p.category_id = c.id
-    LEFT JOIN brands b ON p.brand_id = b.id
+    LEFT JOIN categories c ON p.category_id = c.id AND c.store_id = p.store_id
+    LEFT JOIN brands b ON p.brand_id = b.id AND b.store_id = p.store_id
     WHERE p.store_id = ? AND p.slug = ? AND p.status = 'published'
   `).bind(store.id, productSlug).first() as any;
 
   if (!product) return c.json({ error: 'Produto não encontrado' }, 404);
 
-  const images = await c.env.DB.prepare('SELECT id, product_id, url, alt_text, is_primary, is_ai_generated, sort_order FROM product_images WHERE product_id = ? ORDER BY is_primary DESC, sort_order').bind(product.id).all();
+  const images = await c.env.DB.prepare('SELECT id, product_id, url, alt_text, is_primary, is_ai_generated, sort_order FROM product_images WHERE product_id = ? AND store_id = ? ORDER BY is_primary DESC, sort_order').bind(product.id, store.id).all();
 
   // Produtos relacionados (mesma categoria)
   const related = await c.env.DB.prepare(`
     SELECT p.id, p.store_id, p.sku, p.name, p.slug, p.short_description, p.description, p.price, p.original_price, p.promotional_price, p.category_id, p.brand_id, p.status, p.is_featured, p.is_on_sale, p.stock_quantity, p.dimensions, p.technical_specs, p.variations, pi.url as primary_image FROM products p
-    LEFT JOIN product_images pi ON pi.product_id = p.id AND pi.is_primary = 1
+    LEFT JOIN product_images pi ON pi.product_id = p.id AND pi.store_id = p.store_id AND pi.is_primary = 1
     WHERE p.store_id = ? AND p.category_id = ? AND p.id != ? AND p.status = 'published'
     ORDER BY RANDOM() LIMIT 4
   `).bind(store.id, product.category_id, product.id).all();
@@ -264,7 +264,7 @@ publicRoutes.get('/search', async (c) => {
     SELECT p.id, p.store_id, p.sku, p.name, p.slug, p.short_description, p.description, p.price, p.original_price, p.promotional_price, p.category_id, p.brand_id, p.status, p.is_featured, p.is_on_sale, p.stock_quantity, p.dimensions, p.technical_specs, p.variations, s.name as store_name, s.slug as store_slug, pi.url as primary_image
     FROM products p
     JOIN stores s ON p.store_id = s.id
-    LEFT JOIN product_images pi ON pi.product_id = p.id AND pi.is_primary = 1
+    LEFT JOIN product_images pi ON pi.product_id = p.id AND pi.store_id = p.store_id AND pi.is_primary = 1
     WHERE p.status = 'published' AND s.status = 'active' AND (p.name LIKE ? ESCAPE '\\' OR p.description LIKE ? ESCAPE '\\')
     ORDER BY p.views DESC LIMIT 10
   `).bind(escapePublicLike(q), escapePublicLike(q)).all();
