@@ -1,4 +1,5 @@
 import api from '../../lib/api';
+import { getWhatsAppContactUrl } from '../../lib/whatsapp';
 import React, { useState, useEffect } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
@@ -175,6 +176,7 @@ export function StoreAdminLayout({ children }: { children: React.ReactNode }) {
 }
 
 export function PublicLayout({ children, store, categories }: { children: React.ReactNode; store?: any; categories?: any[] }) {
+  const whatsappUrl = getWhatsAppContactUrl(store?.whatsapp);
   return (
     <div className="min-h-screen bg-white">
       {/* Header Loja */}
@@ -187,8 +189,8 @@ export function PublicLayout({ children, store, categories }: { children: React.
                 <span className="font-display font-bold text-base sm:text-xl text-gray-900 truncate">{store.name}</span>
               </Link>
               <div className="flex items-center gap-2">
-                {store.whatsapp && (
-                  <a href={`https://wa.me/${store.whatsapp.replace(/\D/g,'')}`} target="_blank" rel="noreferrer" className="inline-flex items-center gap-2 px-4 py-2 rounded-full text-white text-sm font-medium" style={{ background: '#25D366' }}>
+                {whatsappUrl && (
+                  <a href={whatsappUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-2 px-4 py-2 rounded-full text-white text-sm font-medium" style={{ background: '#25D366' }}>
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0a12 12 0 0 0-10 18.5L0 24l5.7-1.5A12 12 0 1 0 12 0zm5.4 17.3c-.2.6-1.2 1.1-1.7 1.1-.4 0-.8.1-2.7-.6-2.3-1-3.7-3.3-3.8-3.5-.1-.1-1-1.3-1-2.5s.6-1.8.8-2c.2-.2.4-.3.6-.3h.4c.1 0 .3 0 .4.3l.7 1.7c0 .1 0 .3-.1.4l-.3.4c-.1.1-.2.2-.1.4.1.2.5.8 1 1.3.7.7 1.2 1 1.4 1.1.1.1.3 0 .4-.1l.5-.6c.1-.1.2-.1.4 0l1.6.8c.1.1.2.1.2.3v.4c0 .2-.1.6-.3.8z"/></svg>
                     <span className="hidden sm:inline">WhatsApp</span>
                   </a>
