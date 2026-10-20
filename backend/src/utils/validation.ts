@@ -104,7 +104,11 @@ export const createCategorySchema = z.object({
   name: z.string().min(2),
   slug: z.string().optional(),
   description: z.string().optional(),
-  parent_id: z.string().optional().nullable(),
+  // O formulário pode enviar '' ao remover a categoria pai.
+  parent_id: z.preprocess(
+    value => value === '' ? null : value,
+    z.string().min(1).nullable().optional()
+  ),
   sort_order: z.coerce.number().int().min(0).optional(),
   is_active: z.boolean().optional()
 });
