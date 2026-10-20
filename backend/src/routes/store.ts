@@ -5,7 +5,8 @@ import { createProductSchema, createCategorySchema, createBrandSchema, createBan
 import { slugify } from '../utils/slug.js';
 import { resolveAIInputImage } from '../utils/aiImage.js';
 import { isOwnedStorageImageUrl, areOwnedStorageImages } from '../utils/imageOwnership.js';
-import { saveGeneratedImage } from '../services/aiGeneratedStorage.js';
+import { saveGeneratedImage, StorageQuotaExceededError } from '../services/aiGeneratedStorage.js';
+import { releaseStorageBytes } from '../utils/storageQuota.js';
 import { generateProductImage, generateProductDescription, AI_STYLES } from '../services/ai.js';
 
 type Env = {
@@ -748,6 +749,7 @@ store.post('/ai/generate', zValidator('json', aiGenerateSchema), async (c) => {
   }
 
   let generatedObjectKey: string | null = null;
+  let generatedSizeBytes = 0;
   try {
     const config = {
       enabled: true,
@@ -770,9 +772,10 @@ store.post('/ai/generate', zValidator('json', aiGenerateSchema), async (c) => {
         const imgResult = await generateProductImage(config as any, aiImageUrl, style, result.name);
         // Nunca devolver links temporários ou base64 ao navegador.
         const stored = await saveGeneratedImage(
-          c.env.STORAGE, storeId, product_id || null, imgResult.imageBase64
+          c.env.STORAGE, c.env.DB, storeId, product_id || null, imgResult.imageBase64
         );
         generatedObjectKey = stored.key;
+        generatedSizeBytes = stored.sizeBytes;
         result.imageUrl = stored.url;
         result.imageModel = imgResult.model;
         result.cost = (result.cost || 0) + imgResult.cost;
@@ -816,13 +819,21 @@ store.post('/ai/generate', zValidator('json', aiGenerateSchema), async (c) => {
   } catch (error: any) {
     // Se falhar o histórico após salvar no R2, remover o objeto recém-criado.
     if (generatedObjectKey) {
-      try { await c.env.STORAGE.delete(generatedObjectKey); }
-      catch { console.error('Falha ao limpar imagem IA não registrada no histórico'); }
+      try {
+        await c.env.STORAGE.delete(generatedObjectKey);
+        await releaseStorageBytes(c.env.DB, storeId, generatedSizeBytes);
+      } catch {
+        // Se o R2 não confirmou a exclusão, a cota permanece reservada.
+        console.error('Falha ao limpar imagem IA ou devolver cota');
+      }
     }
     // Respostas de provedores podem conter informação interna: não retornar ao cliente.
     const reason = String(error?.message || 'Falha na IA').slice(0, 500);
     await c.env.DB.prepare("UPDATE ai_generations SET status = 'failed', error_message = ? WHERE id = ? AND store_id = ?")
       .bind(reason, generationId, storeId).run().catch(() => {});
+    if (error instanceof StorageQuotaExceededError) {
+      return c.json({ error: 'Limite de armazenamento da loja atingido' }, 413);
+    }
     return c.json({ error: 'Não foi possível concluir a geração com IA' }, 500);
   }
 });
