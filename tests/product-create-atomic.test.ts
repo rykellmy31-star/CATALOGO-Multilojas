@@ -132,6 +132,23 @@ describe('Cadastro atômico multiempresa', () => {
     expect(image).toMatchObject({ store_id: 'a', is_ai_generated: 0, ai_style: null });
   });
 
+  it('rejeita nome sem slug possível, sem gravar produto ou imagem', async () => {
+    f = fixture();
+    const before = count('products');
+    const result = await create({ name: '🚀🚀', price: 15, images });
+    expect(result.status).toBe(400);
+    expect(count('products')).toBe(before);
+    expect(count('product_images')).toBe(0);
+  });
+
+  it('rejeita slug explícito vazio após normalização', async () => {
+    f = fixture();
+    const before = count('products');
+    const result = await create({ name: 'Produto válido', slug: '🚀🚀', price: 15 });
+    expect(result.status).toBe(400);
+    expect(count('products')).toBe(before);
+  });
+
   it('permite produto sem imagem', async () => {
     f = fixture();
     const response = await create({ name: 'Sem imagem', price: 0 });
