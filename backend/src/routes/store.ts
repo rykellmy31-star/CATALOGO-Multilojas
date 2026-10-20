@@ -578,9 +578,29 @@ store.put('/categories/:id', zValidator('json', createCategorySchema.partial()),
   if (!updates.length) return c.json({ error: 'Nenhum campo para atualizar' }, 400);
   updates.push("updated_at = datetime('now')"); params.push(id, storeId);
 
+  // A checagem também faz parte do UPDATE atômico. Isso bloqueia
+  // ciclos criados por duas reparentalizações concorrentes.
+  const cycleGuard = data.parent_id ? `
+    AND NOT EXISTS (
+      WITH RECURSIVE descendants(id) AS (
+        SELECT id FROM categories WHERE id = ? AND store_id = ?
+        UNION
+        SELECT child.id FROM categories AS child
+        JOIN descendants AS parent ON child.parent_id = parent.id
+        WHERE child.store_id = ?
+      )
+      SELECT 1 FROM descendants WHERE id = ?
+    )` : '';
+  const bindings = data.parent_id
+    ? [...params, id, storeId, storeId, data.parent_id]
+    : params;
   try {
-    await c.env.DB.prepare(`UPDATE categories SET ${updates.join(', ')} WHERE id = ? AND store_id = ?`)
-      .bind(...params).run();
+    const result = await c.env.DB.prepare(
+      `UPDATE categories SET ${updates.join(', ')} WHERE id = ? AND store_id = ?${cycleGuard}`
+    ).bind(...bindings).run();
+    if (data.parent_id && result.meta?.changes !== 1) {
+      return c.json({ error: 'Uma categoria não pode ser filha de si mesma ou de uma subcategoria' }, 400);
+    }
   } catch (error) {
     // Também cobre colisões que ocorrerem entre a consulta e o UPDATE.
     if (String(error).toLowerCase().includes('unique constraint failed: categories.store_id, categories.slug')) {
