@@ -18,8 +18,20 @@ export function fixture() {
     return { bind(...values: any[]) { args = values; return this; },
       async first() { return db.prepare(sql).get(...args) || null; },
       async all() { return { results: db.prepare(sql).all(...args), success: true }; },
-      async run() { const meta = db.prepare(sql).run(...args); return { success: true, meta }; }
+      async run() { const meta = db.prepare(sql).run(...args); return { success: true, meta }; },
+      // D1.batch é transacional. O teste replica a operação usando SQLite local.
+      runSync() { const meta = db.prepare(sql).run(...args); return { success: true, meta }; }
     };
+  }, async batch(statements: any[]) {
+    db.exec('BEGIN');
+    try {
+      const results = statements.map(statement => statement.runSync());
+      db.exec('COMMIT');
+      return results;
+    } catch (error) {
+      db.exec('ROLLBACK');
+      throw error;
+    }
   }};
   const secret = 'test-secret-with-at-least-thirty-two-characters';
   const token = (id='ua', storeId: string | null='a', role: 'store_admin' | 'super_admin'='store_admin') => signToken({ userId:id, email:id==='root'?'root@test.com':`${storeId}@test.com`, role, storeId },secret);
