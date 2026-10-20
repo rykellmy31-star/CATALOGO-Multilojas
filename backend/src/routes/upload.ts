@@ -24,6 +24,38 @@ const upload = new Hono<Env>();
 
 upload.use('/', authMiddleware as any);
 
+// GET /api/upload/preview/:key — prévia privada autenticada, sem token na URL.
+// Compatível com clientes que requisitam o arquivo via Authorization e blob.
+upload.get('/preview/:key{.*}', authMiddleware as any, async (c) => {
+  const key = c.req.param('key');
+  const parts = key.split('/');
+  if (parts.length !== 5 || parts[0] !== 'stores' || parts[2] !== 'products' ||
+      !/^[a-z0-9_-]{1,128}$/i.test(parts[1]) ||
+      !/^[a-z0-9_-]{1,128}$/i.test(parts[3]) ||
+      !/^[a-z0-9-]{1,128}\\.(?:jpe?g|png|webp|gif)$/i.test(parts[4])) {
+    return c.json({ error: 'Arquivo não encontrado' }, 404);
+  }
+  const user = (c as any).get('user');
+  if (user.role !== 'super_admin' && parts[1] !== user.storeId) {
+    return c.json({ error: 'Arquivo não encontrado' }, 404);
+  }
+  try {
+    const obj = await c.env.STORAGE.get(key);
+    if (!obj) return c.json({ error: 'Arquivo não encontrado' }, 404);
+    const type = normalizeStoredImageType(obj.httpMetadata?.contentType);
+    if (!type) return c.json({ error: 'Arquivo não encontrado' }, 404);
+    return new Response(obj.body, {
+      headers: {
+        'Content-Type': type,
+        'Cache-Control': 'private, no-store',
+        'X-Content-Type-Options': 'nosniff'
+      }
+    });
+  } catch {
+    return c.json({ error: 'Não foi possível carregar a imagem' }, 503);
+  }
+});
+
 // POST /api/upload - upload de imagem
 upload.post('/', async (c) => {
   const user = (c as any).get('user');
