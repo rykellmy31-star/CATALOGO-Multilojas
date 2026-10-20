@@ -20,6 +20,8 @@ export default function ProductForm() {
   });
   const [images, setImages] = useState<string[]>([]);
   const [existingImages, setExistingImages] = useState<any[]>([]);
+  const [loadedProductId, setLoadedProductId] = useState<string | null>(null);
+  const productPending = isEdit && loadedProductId !== id;
   const [previewOpen, setPreviewOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [uploading, setUploading] = useState(false);
@@ -51,21 +53,46 @@ export default function ProductForm() {
   const [aiError, setAiError] = useState('');
 
   useEffect(() => {
-    api.get('/store/categories').then(r=>setCategories(r.data.categories || [])).catch(()=>{});
-    api.get('/store/brands').then(r=>setBrands(r.data.brands || [])).catch(()=>{});
-    if (isEdit) {
-      api.get(`/store/products/${id}`).then(r=>{
-        const p = r.data.product;
-        setForm({
-          name: p.name || '', sku: p.sku || '', short_description: p.short_description || '', description: p.description || '',
-          price: p.price ?? '', original_price: p.original_price || '', promotional_price: p.promotional_price || '',
-          category_id: p.category_id || '', brand_id: p.brand_id || '', status: p.status || 'draft',
-          is_featured: !!p.is_featured, is_on_sale: !!p.is_on_sale, stock_quantity: p.stock_quantity || 0,
-          dimensions: p.dimensions || '', technical_specs: p.technical_specs || ''
-        });
-        setExistingImages(r.data.images || []);
-      }).catch(()=>toast.error('Erro ao carregar produto'));
+    const controller = new AbortController();
+    setLoadedProductId(null);
+    setImages([]);
+    setExistingImages([]);
+    setAiImage(null);
+    setAiResult(null);
+    setAiError('');
+    setForm({
+      name: '', sku: '', short_description: '', description: '', price: '',
+      original_price: '', promotional_price: '', category_id: '', brand_id: '',
+      status: 'draft', is_featured: false, is_on_sale: false,
+      stock_quantity: 0, dimensions: '', technical_specs: ''
+    });
+    api.get('/store/categories', { signal: controller.signal })
+      .then(r => { if (!controller.signal.aborted) setCategories(r.data.categories || []); })
+      .catch(() => {});
+    api.get('/store/brands', { signal: controller.signal })
+      .then(r => { if (!controller.signal.aborted) setBrands(r.data.brands || []); })
+      .catch(() => {});
+    if (id) {
+      api.get(`/store/products/${id}`, { signal: controller.signal })
+        .then(r => {
+          if (controller.signal.aborted) return;
+          const p = r.data.product;
+          if (!p) throw new Error('Produto não encontrado');
+          setForm({
+            name: p.name || '', sku: p.sku || '', short_description: p.short_description || '',
+            description: p.description || '', price: p.price ?? '',
+            original_price: p.original_price ?? '', promotional_price: p.promotional_price ?? '',
+            category_id: p.category_id || '', brand_id: p.brand_id || '', status: p.status || 'draft',
+            is_featured: !!p.is_featured, is_on_sale: !!p.is_on_sale,
+            stock_quantity: p.stock_quantity || 0, dimensions: p.dimensions || '',
+            technical_specs: p.technical_specs || ''
+          });
+          setExistingImages(r.data.images || []);
+          setLoadedProductId(id);
+        })
+        .catch(() => { if (!controller.signal.aborted) toast.error('Erro ao carregar produto'); });
     }
+    return () => controller.abort();
   }, [id]);
 
   const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -113,6 +140,7 @@ export default function ProductForm() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (savingRef.current) return;
+    if (productPending) return toast.error('Aguarde carregar os dados do produto');
     if (galleryUploadingRef.current || aiUploadRef.current.pending || aiGeneratingRef.current || applyingAIRef.current) {
       return toast.error('Aguarde os uploads e a IA terminarem antes de salvar');
     }
@@ -222,6 +250,7 @@ export default function ProductForm() {
   };
 
   const handleGenerateAI = async () => {
+    if (productPending) return toast.error('Aguarde carregar o produto');
     if (savingRef.current || galleryUploadingRef.current || aiUploadRef.current.pending) {
       return toast.error('Aguarde o envio e o salvamento das imagens terminar');
     }
@@ -518,7 +547,7 @@ export default function ProductForm() {
             <p className="text-xs text-gray-500 mt-2">A primeira imagem será a capa. Salve para aplicar as alterações.</p>
           </Card>
 
-          <Button type="submit" loading={loading} disabled={loading || uploading || aiUploading || aiLoading || applyingAI} className="w-full" size="lg">
+          <Button type="submit" loading={loading} disabled={productPending || loading || uploading || aiUploading || aiLoading || applyingAI} className="w-full" size="lg">
             <Save className="w-4 h-4 mr-2" /> {isEdit ? 'Salvar Alterações' : 'Criar Produto'}
           </Button>
 
