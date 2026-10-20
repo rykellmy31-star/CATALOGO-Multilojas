@@ -20,7 +20,9 @@ describe('Catálogo: atualização leve de campanhas', () => {
   it('não recarrega a home nem contabiliza visita a cada atualização', () => {
     expect(source).toContain('api.get(`/public/stores/${slug}/banners`');
     expect(source).toContain('setBanners(data.banners || [])');
-    expect(source).toContain('window.setInterval(refreshBanners, 60_000)');
+    expect(source).toContain('window.setTimeout(() => refreshBanners(true), delay)');
+    expect(source).toContain('setNextBannerTransitionAt(data.next_transition_at || null)');
+    expect(source).not.toContain('window.setInterval(');
   });
 
   it('faz refresh ao retornar para a aba ou janela', () => {
@@ -31,14 +33,20 @@ describe('Catálogo: atualização leve de campanhas', () => {
 
   it('evita requisições de atualização excessivas ao alternar foco', () => {
     expect(source).toContain('Date.now() - lastRefresh < 5000');
+    expect(source).toContain('if (!force && Date.now() - lastRefresh < 5000) return');
     expect(source).toContain('controller?.abort()');
   });
 
   it('limpa listeners e intervalo ao sair ou mudar de loja', () => {
-    expect(source).toContain('window.clearInterval(interval)');
+    expect(source).toContain('window.clearTimeout(transitionTimer)');
     expect(source).toContain("window.removeEventListener('focus', refreshBanners)");
     expect(source).toContain("document.removeEventListener('visibilitychange', refreshBanners)");
-    expect(source).toContain('}, [slug])');
+    expect(source).toContain('}, [slug, nextBannerTransitionAt])');
+  });
+
+  it('nunca estoura timeout de campanhas muito distantes', () => {
+    expect(source).toContain('2_147_000_000');
+    expect(source).toContain('Math.max(1000, Math.min(');
   });
 
   it('limpa banners quando o servidor informa que a loja não existe', () => {
