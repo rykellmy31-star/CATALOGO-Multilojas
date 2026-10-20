@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import api from '../../lib/api';
 import { Card, Button, Input, Textarea } from '../../components/ui/Button';
 import { Palette, Sparkles, Save, Shield } from 'lucide-react';
@@ -8,18 +8,37 @@ export default function PlatformConfig() {
   const [config, setConfig] = useState<any>({});
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const savingRef = useRef(false);
 
   useEffect(()=>{
     api.get('/superadmin/platform-config').then(r=>setConfig(r.data.config || {})).catch(()=>{}).finally(()=>setLoading(false));
   },[]);
 
   const handleSave = async () => {
+    if (savingRef.current) return;
+    const limits = [
+      ['ai_daily_limit_default', 0, 10000],
+      ['ai_monthly_limit_default', 0, 100000],
+      ['storage_limit_per_store_mb', 1, 102400]
+    ] as const;
+    if (limits.some(([field, min, max]) => {
+      const value = config[field];
+      return value !== undefined && (!Number.isInteger(value) || value < min || value > max);
+    })) {
+      return toast.error('Verifique os limites de IA e armazenamento');
+    }
+    savingRef.current = true;
     setSaving(true);
     try {
       const { data } = await api.put('/superadmin/platform-config', config);
       setConfig(data.config);
       toast.success('Configurações da plataforma salvas!');
-    } catch (e:any) { toast.error(e.response?.data?.error || 'Erro ao salvar'); } finally { setSaving(false); }
+    } catch (e: any) {
+      toast.error(e?.response?.data?.error || 'Erro ao salvar');
+    } finally {
+      savingRef.current = false;
+      setSaving(false);
+    }
   };
 
   if (loading) return <div className="h-64 bg-gray-100 rounded-2xl animate-pulse" />;
@@ -83,9 +102,9 @@ export default function PlatformConfig() {
             </div>
           </div>
           <div className="grid sm:grid-cols-3 gap-4">
-            <Input label="Limite Diário Padrão (por loja)" type="number" value={config.ai_daily_limit_default || 10} onChange={e=>setConfig({...config, ai_daily_limit_default: parseInt(e.target.value)})} />
-            <Input label="Limite Mensal Padrão" type="number" value={config.ai_monthly_limit_default || 100} onChange={e=>setConfig({...config, ai_monthly_limit_default: parseInt(e.target.value)})} />
-            <Input label="Limite Armazenamento (MB por loja)" type="number" value={config.storage_limit_per_store_mb || 1024} onChange={e=>setConfig({...config, storage_limit_per_store_mb: parseInt(e.target.value)})} />
+            <Input label="Limite Diário Padrão (por loja)" type="number" value={config.ai_daily_limit_default ?? 10} onChange={e=>setConfig({...config, ai_daily_limit_default: e.target.value === '' ? '' : Number(e.target.value)})} />
+            <Input label="Limite Mensal Padrão" type="number" value={config.ai_monthly_limit_default ?? 100} onChange={e=>setConfig({...config, ai_monthly_limit_default: e.target.value === '' ? '' : Number(e.target.value)})} />
+            <Input label="Limite Armazenamento (MB por loja)" type="number" value={config.storage_limit_per_store_mb ?? 1024} onChange={e=>setConfig({...config, storage_limit_per_store_mb: e.target.value === '' ? '' : Number(e.target.value)})} />
           </div>
           <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 text-sm text-amber-800">
             <p className="font-medium flex items-center gap-2"><Shield className="w-4 h-4" /> Configuração da chave de IA</p>
@@ -95,7 +114,7 @@ export default function PlatformConfig() {
         </div>
       </Card>
 
-      <Button onClick={handleSave} loading={saving} size="lg" className="w-full">
+      <Button onClick={handleSave} loading={saving} disabled={saving} size="lg" className="w-full">
         <Save className="w-4 h-4 mr-2" /> Salvar Configurações da Plataforma
       </Button>
     </div>
