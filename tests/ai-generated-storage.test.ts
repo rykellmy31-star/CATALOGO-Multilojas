@@ -4,7 +4,7 @@ import { decodeGeneratedPng, saveGeneratedImage } from '../backend/src/services/
 const bytes = Uint8Array.from([137,80,78,71,13,10,26,10,...Array(32).fill(0)]);
 const base64 = Buffer.from(bytes).toString('base64');
 function storage() {
-  const put = vi.fn(async (key: string) => ({ key }));
+  const put = vi.fn(async (key: string, _body: Uint8Array, _options: unknown) => ({ key }));
   return { put, r2: { put } as unknown as Pick<R2Bucket, 'put'> };
 }
 describe('Persistência segura da imagem gerada pela IA', () => {
