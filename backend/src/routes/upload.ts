@@ -32,7 +32,7 @@ upload.get('/preview/:key{.*}', authMiddleware as any, async (c) => {
   if (parts.length !== 5 || parts[0] !== 'stores' || parts[2] !== 'products' ||
       !/^[a-z0-9_-]{1,128}$/i.test(parts[1]) ||
       !/^[a-z0-9_-]{1,128}$/i.test(parts[3]) ||
-      !/^[a-z0-9-]{1,128}\\.(?:jpe?g|png|webp|gif)$/i.test(parts[4])) {
+      !/^[a-z0-9-]{1,128}\.(?:jpe?g|png|webp|gif)$/i.test(parts[4])) {
     return c.json({ error: 'Arquivo não encontrado' }, 404);
   }
   const user = (c as any).get('user');
@@ -96,9 +96,8 @@ upload.post('/', async (c) => {
     : bytes[0] === 255 && bytes[1] === 216 && bytes[2] === 255;
   if (!validImage) return c.json({ error: 'Conteúdo de imagem inválido' }, 400);
   const ext = ({ 'image/jpeg': 'jpg', 'image/jpg': 'jpg', 'image/png': 'png', 'image/webp': 'webp', 'image/gif': 'gif' } as Record<string, string>)[file.type];
-  const timestamp = Date.now();
-  const random = Math.random().toString(36).substring(2, 8);
-  const key = `stores/${effectiveStoreId}/products/${productId || 'general'}/${timestamp}-${random}.${ext}`;
+  // UUID criptográfico reduz colisões de uploads simultâneos.
+  const key = `stores/${effectiveStoreId}/products/${productId || 'general'}/${crypto.randomUUID()}.${ext}`;
 
   try {
     await c.env.STORAGE.put(key, arrayBuffer, {
@@ -115,14 +114,36 @@ upload.post('/', async (c) => {
   // URLs diretas do R2 contornariam o status de publicação do produto.
   const url = `/api/storage/${encodeURIComponent(key)}`;
 
-  // Se for imagem de produto, já insere no banco
+  // Registra a imagem em uma instrução que recalcula ordem, vínculo e primária
+  // no momento da gravação. Falhas no D1 removem o objeto recém-criado do R2.
   if (productId) {
-    const existingCount = await c.env.DB.prepare('SELECT COUNT(*) as count FROM product_images WHERE product_id = ?').bind(productId).first() as any;
-    const isPrimary = (existingCount?.count || 0) === 0 ? 1 : 0;
-    
-    await c.env.DB.prepare(
-      'INSERT INTO product_images (id, product_id, store_id, url, is_primary, sort_order, file_size_kb) VALUES (?, ?, ?, ?, ?, ?, ?)'
-    ).bind(crypto.randomUUID(), productId, effectiveStoreId, url, isPrimary, existingCount?.count || 0, Math.round(file.size / 1024)).run();
+    try {
+      const inserted = await c.env.DB.prepare(`
+        INSERT INTO product_images (id, product_id, store_id, url, is_primary, sort_order, file_size_kb)
+        SELECT ?, p.id, p.store_id, ?,
+          CASE WHEN NOT EXISTS (
+            SELECT 1 FROM product_images AS pi
+            WHERE pi.product_id = p.id AND pi.store_id = p.store_id
+          ) THEN 1 ELSE 0 END,
+          COALESCE((
+            SELECT MAX(pi.sort_order) + 1 FROM product_images AS pi
+            WHERE pi.product_id = p.id AND pi.store_id = p.store_id
+          ), 0), ?
+        FROM products AS p
+        WHERE p.id = ? AND p.store_id = ?
+      `).bind(crypto.randomUUID(), url, Math.round(file.size / 1024),
+        productId, effectiveStoreId).run();
+      if (inserted.success === false || inserted.meta?.changes !== 1) {
+        throw new Error('Imagem não registrada');
+      }
+    } catch {
+      try {
+        await c.env.STORAGE.delete(key);
+      } catch {
+        console.error('Falha ao limpar arquivo de upload não registrado');
+      }
+      return c.json({ error: 'Não foi possível registrar a imagem. Tente novamente.' }, 503);
+    }
   }
 
   return c.json({ url, key, message: 'Upload realizado com sucesso!' });
