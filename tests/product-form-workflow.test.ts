@@ -89,6 +89,17 @@ describe('Editor de produtos: regressões de concorrência e segurança', () => 
     expect(source).toContain('loadedProductId !== id');
   });
 
+  it('falha ao atualizar galeria não transforma aprovação IA concluída em erro', () => {
+    const apply = handler('applyAIResult');
+    const confirmed = apply.indexOf("await api.post('/store/ai/approve-image'");
+    const refresh = apply.indexOf("await api.get(`/store/products/${id}`)");
+    expect(confirmed).toBeGreaterThan(-1);
+    expect(refresh).toBeGreaterThan(confirmed);
+    expect(apply).toContain('toast.warning(');
+    expect(apply).toContain('Imagem IA aprovada');
+    expect(apply).toContain('toast.success(');
+  });
+
   it('aplica imagem gerada uma única vez antes de liberar o botão', () => {
     const apply = handler('applyAIResult');
     expect(apply).toContain('applyingAIRef.current = true');
