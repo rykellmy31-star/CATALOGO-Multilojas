@@ -56,6 +56,8 @@ describe('Integração local IA -> R2 -> histórico sem chamadas pagas', () => {
     expect(response.generation.imageUrl).toMatch(/^\/api\/storage\//);
     expect(response.generation.imageUrl).not.toContain('base64');
     expect(calls.put).toHaveLength(1);
+    expect((f!.db.prepare("SELECT storage_used_mb FROM stores WHERE id = 'a'").get() as any).storage_used_mb)
+      .toBeCloseTo(PNG.byteLength / (1024 * 1024), 8);
     expect(mocks.edit).toHaveBeenCalledTimes(1);
     expect(String(mocks.edit.mock.calls[0][1])).toMatch(/^data:image\/png;base64,/);
     const history = f!.db.prepare('SELECT generated_image_url, status FROM ai_generations LIMIT 1').get() as any;
@@ -124,8 +126,31 @@ describe('Integração local IA -> R2 -> histórico sem chamadas pagas', () => {
     expect(result.status).toBe(500);
     expect(calls.put).toHaveLength(1);
     expect(calls.deleted).toEqual([calls.put[0][0]]);
+    expect((f!.db.prepare("SELECT storage_used_mb FROM stores WHERE id = 'a'").get() as any).storage_used_mb)
+      .toBeCloseTo(0, 8);
     expect((f!.db.prepare('SELECT status FROM ai_generations LIMIT 1').get() as any).status).toBe('failed');
   });
+  it('armazenamento esgotado rejeita antes de chamar a API paga', async () => {
+    const calls = setup();
+    f!.db.prepare("UPDATE stores SET storage_limit_mb = 0 WHERE id = 'a'").run();
+    const response = await run();
+    expect(response.status).toBe(413);
+    expect(mocks.edit).not.toHaveBeenCalled();
+    expect(calls.put).toHaveLength(0);
+    expect((f!.db.prepare('SELECT COUNT(*) AS n FROM ai_generations').get() as any).n).toBe(0);
+  });
+
+  it('imagem gerada maior que o espaço livre não vai ao R2', async () => {
+    const calls = setup();
+    // A cota quase cheia é positiva, mas menor que o PNG gerado.
+    f!.db.prepare("UPDATE stores SET storage_limit_mb = 1, storage_used_mb = ? WHERE id = 'a'")
+      .run(1 - (PNG.byteLength - 1) / (1024 * 1024));
+    const response = await run();
+    expect(response.status).toBe(413);
+    expect(mocks.edit).toHaveBeenCalledTimes(1);
+    expect(calls.put).toHaveLength(0);
+  });
+
   it('não reserva cota ou chama provedor se imagem privada não existe', async () => {
     const calls = setup({ missingInput: true });
     const result = await run();
