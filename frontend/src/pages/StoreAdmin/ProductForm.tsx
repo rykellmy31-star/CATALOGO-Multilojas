@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, useParams, Link } from 'react-router-dom';
-import api, { getImageUrl } from '../../lib/api';
+import api from '../../lib/api';
+import AdminImage from '../../components/AdminImage';
 import { Card, Button, Input, Textarea, Select, Badge } from '../../components/ui/Button';
 import { ArrowLeft, Upload, Sparkles, X, Save, Eye, Trash2, Wand2, Check, AlertTriangle } from 'lucide-react';
 import { toast } from 'sonner';
@@ -156,7 +157,7 @@ export default function ProductForm() {
         )}
       </div>
 
-      {previewOpen && <div role="dialog" aria-modal="true" aria-label="Prévia do produto" className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4" onClick={()=>setPreviewOpen(false)}><div className="max-w-lg w-full bg-white p-6 rounded-2xl" onClick={e=>e.stopPropagation()}><button type="button" onClick={()=>setPreviewOpen(false)} className="float-right" aria-label="Fechar prévia">✕</button><img src={getImageUrl(existingImages[0]?.url || images[0])} alt={form.name} className="w-full h-64 object-contain"/><h2 className="text-2xl font-bold mt-4">{form.name}</h2><p className="text-xl mt-2">{Number(form.price || 0).toLocaleString('pt-BR',{style:'currency',currency:'BRL'})}</p><p className="mt-4 whitespace-pre-line">{form.description}</p></div></div>}
+      {previewOpen && <div role="dialog" aria-modal="true" aria-label="Prévia do produto" className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4" onClick={()=>setPreviewOpen(false)}><div className="max-w-lg w-full bg-white p-6 rounded-2xl" onClick={e=>e.stopPropagation()}><button type="button" onClick={()=>setPreviewOpen(false)} className="float-right" aria-label="Fechar prévia">✕</button><AdminImage url={existingImages[0]?.url || images[0]} alt={form.name} className="w-full h-64 object-contain"/><h2 className="text-2xl font-bold mt-4">{form.name}</h2><p className="text-xl mt-2">{Number(form.price || 0).toLocaleString('pt-BR',{style:'currency',currency:'BRL'})}</p><p className="mt-4 whitespace-pre-line">{form.description}</p></div></div>}
       {/* IA Banner */}
       <Card className="p-0 overflow-hidden border-sky-200">
         <div className="bg-gradient-to-r from-sky-600 via-violet-600 to-indigo-600 p-4 flex items-center justify-between">
@@ -182,7 +183,7 @@ export default function ProductForm() {
                 <div className="mt-2">
                   {aiImage ? (
                     <div className="relative">
-                      <img src={aiImage} alt="Para IA" className="w-full h-48 object-cover rounded-xl border" />
+                      <AdminImage url={aiImage} alt="Para IA" className="w-full h-48 object-cover rounded-xl border" />
                       <button onClick={()=>setAiImage(null)} className="absolute top-2 right-2 p-1.5 rounded-full bg-white shadow text-red-600 hover:bg-red-50">
                         <X className="w-4 h-4" />
                       </button>
@@ -254,7 +255,7 @@ export default function ProductForm() {
                       <div><span className="font-medium">Descrição curta:</span> {aiResult.shortDescription}</div>
                       <div className="text-xs text-gray-600 line-clamp-3"><span className="font-medium">Descrição:</span> {aiResult.description}</div>
                       {aiResult.category && <div><span className="font-medium">Categoria sugerida:</span> <Badge>{aiResult.category}</Badge></div>}
-                      {aiResult.imageUrl && <img src={aiResult.imageUrl} alt="Gerada IA" className="w-full h-32 object-cover rounded-lg border" />}
+                      {aiResult.imageUrl && <AdminImage url={aiResult.imageUrl} alt="Gerada IA" className="w-full h-32 object-cover rounded-lg border" />}
                       {aiResult.imageUrl && <p className="text-xs text-gray-500">🖼️ Imagem ilustrativa — original preservada</p>}
                     </div>
                     <div className="flex gap-2">
@@ -338,7 +339,7 @@ export default function ProductForm() {
               <div className="grid grid-cols-3 gap-2 mb-4">
                 {existingImages.map((img, idx)=>(
                   <div key={img.id} className="relative group">
-                    <img src={getImageUrl(img.url)} alt="" className="w-full h-20 object-cover rounded-xl border" />
+                    <AdminImage url={img.url} alt="" className="w-full h-20 object-cover rounded-xl border" />
                     {img.is_primary ? <span className="absolute top-1 left-1 bg-sky-600 text-white text-xs px-1.5 py-0.5 rounded-full">Principal</span> : null}
                     {img.is_ai_generated ? <span className="absolute bottom-1 left-1 bg-violet-600 text-white text-xs px-1 py-0.5 rounded-full">IA</span> : null}
                     <button type="button" onClick={()=>removeImage(idx, true)} className="absolute top-1 right-1 p-1 rounded-full bg-white shadow opacity-0 group-hover:opacity-100 transition-opacity text-red-600">
@@ -354,7 +355,7 @@ export default function ProductForm() {
               <div className="grid grid-cols-3 gap-2 mb-4">
                 {images.map((url, idx)=>(
                   <div key={idx} className="relative group">
-                    <img src={url} alt="" className="w-full h-20 object-cover rounded-xl border" />
+                    <AdminImage url={url} alt="" className="w-full h-20 object-cover rounded-xl border" />
                     <button type="button" onClick={()=>removeImage(idx, false)} className="absolute top-1 right-1 p-1 rounded-full bg-white shadow opacity-0 group-hover:opacity-100 text-red-600">
                       <X className="w-3 h-3" />
                     </button>
