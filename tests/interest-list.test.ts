@@ -2,8 +2,11 @@ import { describe, expect, it } from 'vitest';
 import { normalizeInterestProducts, buildInterestListUrl, MAX_INTEREST_PRODUCTS } from '../frontend/src/lib/interestList';
 
 const product = (id: string, name = 'Sofá', slug = 'sofa') => ({ id, name, slug });
-const link = (items: unknown, phone: unknown = '+55 (73) 99999-8888', origin = 'https://catalogo.exemplo') =>
-  buildInterestListUrl(phone, 'Loja de móveis', 'loja-a', items, origin);
+const link = (items: unknown, ...args: [unknown?, string?]) =>
+  buildInterestListUrl(
+    args.length === 0 ? '+55 (73) 99999-8888' : args[0],
+    'Loja de móveis', 'loja-a', items, args.length < 2 ? 'https://catalogo.exemplo' : args[1]!
+  );
 
 describe('Lista de interesse do catálogo', () => {
   it('remove preços e campos privados das cópias antigas', () => {
