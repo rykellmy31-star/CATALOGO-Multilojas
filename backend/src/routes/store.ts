@@ -683,25 +683,50 @@ store.get('/ai/history', async (c) => {
   });
 });
 
-// POST /api/store/ai/approve-image - aprovar imagem gerada
+// POST /api/store/ai/approve-image - aprovação vinculada a geração real
 store.post('/ai/approve-image', async (c) => {
   const storeId = getStoreId(c);
-  const { product_id, image_url, generation_id } = await c.req.json() as any;
-
-  if (!product_id || !image_url) return c.json({ error: 'Produto e imagem obrigatórios' }, 400);
-
-  // Verifica ownership
-  const product = await c.env.DB.prepare('SELECT id FROM products WHERE id = ? AND store_id = ?').bind(product_id, storeId).first();
+  const input = await c.req.json().catch(() => null);
+  if (!input || typeof input !== 'object' || Array.isArray(input)) {
+    return c.json({ error: 'Dados inválidos' }, 400);
+  }
+  const { product_id, image_url, generation_id } = input as Record<string, unknown>;
+  if (typeof product_id !== 'string' || !product_id.trim() ||
+      typeof image_url !== 'string' || !image_url ||
+      typeof generation_id !== 'string' || !generation_id.trim() ||
+      !publicLinkSchema.safeParse(image_url).success) {
+    return c.json({ error: 'Produto, geração e imagem válidos são obrigatórios' }, 400);
+  }
+  const product = await c.env.DB.prepare(
+    'SELECT id FROM products WHERE id = ? AND store_id = ?'
+  ).bind(product_id, storeId).first();
   if (!product) return c.json({ error: 'Produto não encontrado' }, 404);
 
+  // Uma única instrução impede aprovar imagens alheias, forjadas ou já aprovadas.
   const imageId = crypto.randomUUID();
-  await c.env.DB.prepare(
-    'INSERT INTO product_images (id, product_id, store_id, url, is_ai_generated, ai_style, sort_order) VALUES (?, ?, ?, ?, ?, ?, ?)'
-  ).bind(imageId, product_id, storeId, image_url, 1, 'modern_room', 99).run();
-
+  const result = await c.env.DB.prepare(`
+    INSERT INTO product_images (id, product_id, store_id, url, is_ai_generated, ai_style, sort_order)
+    SELECT ?, ?, ?, g.generated_image_url, 1,
+      CASE WHEN g.ai_style IN ('modern_room', 'white_background', 'promotional', 'premium_catalog')
+        THEN g.ai_style ELSE 'modern_room' END,
+      COALESCE((SELECT MAX(pi.sort_order) + 1 FROM product_images AS pi
+        WHERE pi.product_id = ? AND pi.store_id = ?), 0)
+    FROM ai_generations AS g
+    WHERE g.id = ? AND g.store_id = ? AND g.status = 'completed'
+      AND g.generated_image_url = ?
+      AND (g.product_id IS NULL OR g.product_id = ?)
+      AND NOT EXISTS (
+        SELECT 1 FROM product_images AS previous
+        WHERE previous.product_id = ? AND previous.store_id = ?
+          AND previous.url = g.generated_image_url AND previous.is_ai_generated = 1
+      )
+  `).bind(imageId, product_id, storeId, product_id, storeId, generation_id,
+    storeId, image_url, product_id, product_id, storeId).run();
+  if (result.meta?.changes !== 1) {
+    return c.json({ error: 'Geração não encontrada, inválida ou já aprovada' }, 409);
+  }
   return c.json({ message: 'Imagem aprovada e adicionada ao produto!', imageId });
 });
-
 // =====================
 // ANALYTICS
 // =====================
