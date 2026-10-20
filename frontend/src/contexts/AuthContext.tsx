@@ -32,14 +32,10 @@ function normalizeUser(u: any): User {
 }
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
+  // O cache local nunca é prova de autenticação. Só /auth/me libera o painel.
   const [user, setUser] = useState<User | null>(() => {
-    if (!localStorage.getItem('token')) {
-      localStorage.removeItem('user');
-      return null;
-    }
-    const saved = localStorage.getItem('user');
-    try { return saved ? normalizeUser(JSON.parse(saved)) : null; }
-    catch { localStorage.removeItem('user'); return null; }
+    if (!localStorage.getItem('token')) localStorage.removeItem('user');
+    return null;
   });
   const [token, setToken] = useState<string | null>(() => localStorage.getItem('token'));
   const [loading, setLoading] = useState(true);
@@ -69,6 +65,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           localStorage.setItem('user', JSON.stringify(mapped));
         } catch {
           if (controller.signal.aborted || authRevision.current !== revision || localStorage.getItem('token') !== savedToken) return;
+          observedToken.current = null;
           localStorage.removeItem('token');
           localStorage.removeItem('user');
           setUser(null);
