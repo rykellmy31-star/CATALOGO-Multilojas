@@ -288,31 +288,47 @@ store.delete('/products/:id', async (c) => {
 store.post('/products/:id/duplicate', async (c) => {
   const storeId = getStoreId(c);
   const id = c.req.param('id');
-  
   const product = await c.env.DB.prepare('SELECT * FROM products WHERE id = ? AND store_id = ?').bind(id, storeId).first() as any;
   if (!product) return c.json({ error: 'Produto não encontrado' }, 404);
 
   const newId = crypto.randomUUID();
-  const newSlug = `${product.slug}-copia-${Date.now().toString(36).slice(-4)}`;
+  // Identificadores únicos impedem colisões após várias duplicações consecutivas.
+  const newSlug = `${product.slug}-copia-${newId}`;
+  const newSku = product.sku ? `${product.sku}-COPY-${newId}` : null;
   const newName = `${product.name} (Cópia)`;
 
-  await c.env.DB.prepare(`
-    INSERT INTO products (id, store_id, sku, name, slug, short_description, description, price, original_price, promotional_price, category_id, brand_id, status, is_featured, is_on_sale, stock_quantity, dimensions, technical_specs, variations)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'draft', ?, ?, ?, ?, ?, ?)
-  `).bind(newId, storeId, product.sku ? `${product.sku}-COPY` : null, newName, newSlug, product.short_description, product.description, product.price, product.original_price, product.promotional_price, product.category_id, product.brand_id, product.is_featured, product.is_on_sale, product.stock_quantity, product.dimensions, product.technical_specs, product.variations).run();
+  // O batch do D1 grava produto e fotos em uma transação atômica.
+  const insertProduct = c.env.DB.prepare(`
+    INSERT INTO products (
+      id, store_id, sku, name, slug, short_description, description, price, original_price, promotional_price, cost_price, category_id,
+      brand_id, status, is_featured, is_on_sale, stock_quantity, stock_unlimited, weight, dimensions, technical_specs, variations, sort_order, seo_title, seo_description
+    ) VALUES (
+      ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+      ?, 'draft', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+    )
+  `).bind(
+    newId, storeId, newSku, newName, newSlug, product.short_description, product.description, product.price, product.original_price, product.promotional_price, product.cost_price, product.category_id,
+    product.brand_id, product.is_featured, product.is_on_sale, product.stock_quantity, product.stock_unlimited, product.weight, product.dimensions, product.technical_specs, product.variations, product.sort_order, product.seo_title, product.seo_description
+  );
 
-  // Duplica imagens
-  const images = await c.env.DB.prepare('SELECT * FROM product_images WHERE product_id = ?').bind(id).all();
-  for (const img of ((images as any).results || images) as any[]) {
-    await c.env.DB.prepare(
-      'INSERT INTO product_images (id, product_id, store_id, url, is_primary, is_ai_generated, ai_style, sort_order) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
-    ).bind(crypto.randomUUID(), newId, storeId, img.url, img.is_primary, img.is_ai_generated, img.ai_style, img.sort_order).run();
-  }
+  // Copia imagens dentro da transação, sempre da mesma loja.
+  // original_image_id permanece NULL: não aponta para o produto antigo.
+  const copyImages = c.env.DB.prepare(`
+    INSERT INTO product_images (
+      id, product_id, store_id, url, thumbnail_url, medium_url, alt_text,
+      is_primary, is_ai_generated, ai_style, ai_prompt, sort_order,
+      file_size_kb, width, height
+    )
+    SELECT lower(hex(randomblob(16))), ?, ?, url, thumbnail_url, medium_url, alt_text,
+      is_primary, is_ai_generated, ai_style, ai_prompt, sort_order,
+      file_size_kb, width, height
+    FROM product_images WHERE product_id = ? AND store_id = ?
+  `).bind(newId, storeId, id, storeId);
 
-  const newProduct = await c.env.DB.prepare('SELECT * FROM products WHERE id = ?').bind(newId).first();
+  await c.env.DB.batch([insertProduct, copyImages]);
+  const newProduct = await c.env.DB.prepare('SELECT * FROM products WHERE id = ? AND store_id = ?').bind(newId, storeId).first();
   return c.json({ product: newProduct, message: 'Produto duplicado com sucesso!' }, 201);
 });
-
 // =====================
 // CATEGORIES
 // =====================
