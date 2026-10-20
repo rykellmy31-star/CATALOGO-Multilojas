@@ -112,6 +112,24 @@ describe('Consultas da vitrine e do painel não cruzam lojas', () => {
     expect(JSON.stringify(response)).not.toContain('Produto B');
   });
 
+  it('categorias e marcas válidas da loja continuam aparecendo normalmente', async () => {
+    contaminatedFixture();
+    f!.db.prepare(
+      "INSERT INTO brands (id,store_id,name,slug) VALUES ('brand-a','a','Marca A','marca-a')"
+    ).run();
+    f!.db.prepare(
+      "UPDATE products SET category_id='ca', brand_id='brand-a' WHERE id='pa'"
+    ).run();
+    const listing = await get('/api/public/stores/loja-a/products');
+    expect(listing.products[0].category_name).toBe('Cat A');
+    expect(listing.products[0].primary_image).toBe(ownImage);
+    const detail = await get('/api/public/stores/loja-a/products/produto-a');
+    expect(detail.product.category_name).toBe('Cat A');
+    expect(detail.product.brand_name).toBe('Marca A');
+    const admin = await get('/api/store/products', true);
+    expect(admin.products[0].brand_name).toBe('Marca A');
+  });
+
   it('fotos principais duplicadas não duplicam produtos ou resultados públicos', async () => {
     contaminatedFixture();
     // Dois uploads concorrentes podem manter is_primary=1 na mesma loja.
