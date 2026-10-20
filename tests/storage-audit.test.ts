@@ -50,6 +50,11 @@ describe('Auditoria R2 sem mutação de produção', () => {
     expect(result.review_candidates.map((x: any) => x.key)).toEqual([key('orphan')]);
     expect(result.quota).toMatchObject({ recorded_used_mb: 2.5, limit_mb: 10 });
     expect(result.complete_store_scan).toBe(true);
+    expect(result.reconciliation).toMatchObject({
+      is_complete_snapshot: true, automatic_adjustment: false
+    });
+    expect(result.reconciliation.actual_r2_mb).toBeCloseTo(6144 / 1048576);
+    expect(result.reconciliation.difference_mb).toBeCloseTo(6144 / 1048576 - 2.5);
     expect((f!.db.prepare("SELECT storage_used_mb FROM stores WHERE id = 'a'").get() as any).storage_used_mb).toBe(2.5);
     expect(list.mock.calls[0][0]).toMatchObject({ prefix: 'stores/a/', limit: 100 });
     expect(del).not.toHaveBeenCalled();
@@ -85,6 +90,10 @@ describe('Auditoria R2 sem mutação de produção', () => {
     expect(response.status).toBe(200);
     const result = await response.json() as any;
     expect(result.complete_store_scan).toBe(false);
+    expect(result.reconciliation).toEqual({
+      is_complete_snapshot: false, actual_r2_mb: null,
+      difference_mb: null, automatic_adjustment: false
+    });
     expect(result.pagination).toEqual({ has_more: true, next_cursor: 'opaque_cursor_value' });
     expect(result.scanned.objects).toBe(1);
     expect(list.mock.calls[0][0]).toMatchObject({
@@ -97,6 +106,26 @@ describe('Auditoria R2 sem mutação de produção', () => {
     const result = await (await request()).json() as any;
     expect(result.scanned.unknown_upload_date).toBe(1);
     expect(result.scanned.older_than_7_days_for_review).toBe(0);
+  });
+
+  it('página vazia não executa SQL de URLs e não sugere limpeza', async () => {
+    const { request, del } = setup([]);
+    const response = await request();
+    expect(response.status).toBe(200);
+    const result = await response.json() as any;
+    expect(result.scanned.objects).toBe(0);
+    expect(result.review_candidates).toEqual([]);
+    expect(result.reconciliation.actual_r2_mb).toBe(0);
+    expect(del).not.toHaveBeenCalled();
+  });
+
+  it('não presume que página posterior represente o uso total da loja', async () => {
+    const { request } = setup([object('other')], false);
+    const response = await request('?cursor=second-page');
+    expect(response.status).toBe(200);
+    const result = await response.json() as any;
+    expect(result.complete_store_scan).toBe(false);
+    expect(result.reconciliation.actual_r2_mb).toBeNull();
   });
 
   it('nunca mistura chave de outra loja no relatório', async () => {
