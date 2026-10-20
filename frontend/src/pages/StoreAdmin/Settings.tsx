@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
-import api, { getImageUrl } from '../../lib/api';
+import api from '../../lib/api';
+import AdminImage from '../../components/AdminImage';
 import { Card, Button, Input, Textarea } from '../../components/ui/Button';
 import { Save, Upload, ExternalLink, Palette } from 'lucide-react';
 import { toast } from 'sonner';
@@ -55,6 +56,13 @@ export default function Settings() {
       setStore(current => current.logo_url === previousLogoUrl
         ? { ...current, logo_url: data.url } : current);
       toast.success('Logo enviada! Clique em Salvar.');
+      api.get('/store/settings').then(({ data: updated }) => {
+        setStore(current => ({
+          ...current,
+          storage_used_mb: updated.store?.storage_used_mb ?? current.storage_used_mb,
+          storage_limit_mb: updated.store?.storage_limit_mb ?? current.storage_limit_mb
+        }));
+      }).catch(() => {});
     } catch {
       toast.error('Erro ao enviar a logomarca');
     } finally {
@@ -65,6 +73,10 @@ export default function Settings() {
   };
 
   if (loading) return <div className="h-64 bg-gray-100 rounded-2xl animate-pulse" />;
+
+  const storageUsed = Math.max(0, Number(store.storage_used_mb) || 0);
+  const storageLimit = Math.max(0, Number(store.storage_limit_mb) || 0);
+  const storagePercent = storageLimit > 0 ? Math.min(100, 100 * storageUsed / storageLimit) : 100;
 
   return (
     <div className="max-w-4xl space-y-6">
@@ -79,6 +91,21 @@ export default function Settings() {
       </div>
 
       <Card className="p-6">
+        <h3 className="font-semibold text-gray-900 mb-3">Armazenamento da loja</h3>
+        <p className="text-sm text-gray-600 mb-3">
+          {storageUsed.toFixed(2)} MB utilizados de {storageLimit.toFixed(0)} MB disponíveis
+        </p>
+        <progress value={storagePercent} max={100} className="w-full h-3 rounded-full" aria-label="Percentual do armazenamento utilizado" />
+        {storagePercent >= 90 && (
+          <p role="status" className="text-sm mt-2 text-amber-700">
+            {storagePercent >= 100
+              ? 'Limite atingido: novos uploads e imagens geradas por IA ficarão indisponíveis.'
+              : 'Armazenamento próximo do limite. Procure o administrador para aumentar a cota.'}
+          </p>
+        )}
+      </Card>
+
+      <Card className="p-6">
         <h3 className="font-semibold text-gray-900 mb-4 flex items-center gap-2"><Palette className="w-5 h-5 text-sky-600" /> Identidade Visual</h3>
         <div className="space-y-4">
           <div className="grid sm:grid-cols-2 gap-4">
@@ -90,7 +117,7 @@ export default function Settings() {
           <div>
             <label className="text-sm font-medium text-gray-700">Logomarca</label>
             <div className="mt-2 flex items-center gap-4">
-              {store.logo_url ? <img src={getImageUrl(store.logo_url)} alt="Logo" className="w-20 h-20 rounded-xl border object-contain bg-white" /> : <div className="w-20 h-20 rounded-xl border-2 border-dashed flex items-center justify-center text-gray-400">Logo</div>}
+              {store.logo_url ? <AdminImage url={store.logo_url} alt="Logo" className="w-20 h-20 rounded-xl border object-contain bg-white" /> : <div className="w-20 h-20 rounded-xl border-2 border-dashed flex items-center justify-center text-gray-400">Logo</div>}
               <label className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border bg-white hover:bg-gray-50 cursor-pointer text-sm font-medium">
                 <Upload className="w-4 h-4" /> Enviar Logo
                 <input type="file" accept="image/*" className="hidden" disabled={uploadingLogo || saving} onChange={handleLogoUpload} />
