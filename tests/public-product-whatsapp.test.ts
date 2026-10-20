@@ -32,6 +32,17 @@ describe('API pública: contato WhatsApp com endereço completo', () => {
     expect(await productContact(phone)).toBeNull();
   });
 
+  it('inclui o contador real de visualizações do produto publicado', async () => {
+    fixtureState = fixture();
+    fixtureState.db.prepare("UPDATE products SET views = 37 WHERE id = 'pa'").run();
+    const response = await fixtureState.request(
+      '/api/public/stores/loja-a/products/produto-a', 'GET', undefined, null
+    );
+    expect(response.status).toBe(200);
+    const payload = await response.json() as any;
+    expect(payload.product.views).toBe(37);
+  });
+
   it('não confunde preço antigo com informação atual da página', async () => {
     const link = await productContact('+5573999998888');
     const text = new URL(link!).searchParams.get('text')!;
