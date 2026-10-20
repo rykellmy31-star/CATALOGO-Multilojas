@@ -115,6 +115,47 @@ describe('Cadastro atômico multiempresa', () => {
     }]);
   });
 
+  it('não atribui ao novo produto a geração IA vinculada a outro produto da mesma loja', async () => {
+    f = fixture();
+    const generated = 'https://example.com/ia-vinculada-ao-produto-a.png';
+    f.db.prepare(`
+      INSERT INTO ai_generations
+        (id, store_id, user_id, product_id, type, status, generated_image_url, ai_style)
+      VALUES ('gen-product-a', 'a', 'ua', 'pa', 'image', 'completed', ?, 'promotional')
+    `).run(generated);
+    const response = await create({
+      name: 'Produto independente', price: 129, images: [generated]
+    });
+    expect(response.status).toBe(201);
+    const { product } = await response.json() as any;
+    expect(f.db.prepare(
+      'SELECT is_ai_generated, ai_style FROM product_images WHERE product_id = ?'
+    ).get(product.id)).toMatchObject({ is_ai_generated: 0, ai_style: null });
+  });
+
+  it('seleciona de forma determinística a geração IA concluída mais recente da loja', async () => {
+    f = fixture();
+    const generated = 'https://example.com/ia-diferentes-versoes.png';
+    f.db.prepare(`
+      INSERT INTO ai_generations
+        (id, store_id, user_id, type, status, generated_image_url, ai_style, completed_at)
+      VALUES ('gen-older', 'a', 'ua', 'image', 'completed', ?, 'modern_room', '2026-01-01')
+    `).run(generated);
+    f.db.prepare(`
+      INSERT INTO ai_generations
+        (id, store_id, user_id, type, status, generated_image_url, ai_style, completed_at)
+      VALUES ('gen-newer', 'a', 'ua', 'image', 'completed', ?, 'premium_catalog', '2026-02-01')
+    `).run(generated);
+    const response = await create({ name: 'Foto IA atualizada', price: 129, images: [generated] });
+    expect(response.status).toBe(201);
+    const { product } = await response.json() as any;
+    expect(f.db.prepare(
+      'SELECT is_ai_generated, ai_style FROM product_images WHERE product_id = ?'
+    ).get(product.id)).toMatchObject({
+      is_ai_generated: 1, ai_style: 'premium_catalog'
+    });
+  });
+
   it('não marca imagem de geração pendente como IA', async () => {
     f = fixture();
     const url = 'https://example.com/pending.png';
