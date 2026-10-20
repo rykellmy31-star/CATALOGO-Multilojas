@@ -675,8 +675,14 @@ store.post('/ai/generate', zValidator('json', aiGenerateSchema), async (c) => {
   }
 
   // Verifica limites
-  const storeData = await c.env.DB.prepare('SELECT ai_enabled, ai_daily_limit, ai_monthly_limit FROM stores WHERE id = ?').bind(storeId).first() as any;
+  const storeData = await c.env.DB.prepare('SELECT ai_enabled, ai_daily_limit, ai_monthly_limit, storage_limit_mb, storage_used_mb FROM stores WHERE id = ?').bind(storeId).first() as any;
   if (!storeData?.ai_enabled) return c.json({ error: 'IA desabilitada para esta loja. Contate o Super Admin.' }, 403);
+  // Evitar cobrança da IA quando a loja já não tem espaço para imagens.
+  // O tamanho exato do PNG será reservado atomicamente após a geração.
+  if (generate_image && (
+    Number(storeData.storage_limit_mb ?? 0) <= 0 ||
+    Number(storeData.storage_used_mb ?? 0) >= Number(storeData.storage_limit_mb)
+  )) return c.json({ error: 'Limite de armazenamento da loja atingido' }, 413);
 
   // Zero significa nenhuma geração autorizada, não o limite padrão.
   const dailyLimit = Math.max(0, Number(storeData.ai_daily_limit ?? 10));
