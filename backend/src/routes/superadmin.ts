@@ -218,8 +218,11 @@ superadmin.delete('/stores/:id', async (c) => {
   const id = c.req.param('id');
   const user = c.get('user');
 
-  await c.env.DB.prepare("UPDATE stores SET status = 'deleted', updated_at = datetime('now') WHERE id = ?").bind(id).run();
-  
+  const result = await c.env.DB.prepare(
+    "UPDATE stores SET status = 'deleted', updated_at = datetime('now') WHERE id = ? AND status != 'deleted'"
+  ).bind(id).run();
+  if (result.meta?.changes !== 1) return c.json({ error: 'Loja não encontrada' }, 404);
+
   await c.env.DB.prepare(
     'INSERT INTO audit_logs (user_id, store_id, action, entity_type, entity_id, details) VALUES (?, ?, ?, ?, ?, ?)'
   ).bind(user.userId, id, 'delete_store', 'store', id, JSON.stringify({})).run().catch(()=>{});
