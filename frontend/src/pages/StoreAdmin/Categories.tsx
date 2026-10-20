@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import api from '../../lib/api';
 import { Card, Button, Input } from '../../components/ui/Button';
 import { Plus, Trash2, Edit, Tag } from 'lucide-react';
@@ -9,6 +9,8 @@ export default function Categories() {
   const [name, setName] = useState('');
   const [editing, setEditing] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const savingRef = useRef(false);
 
   const fetch = async () => {
     try { const { data } = await api.get('/store/categories'); setCategories(data.categories || []); } catch {} finally { setLoading(false); }
@@ -17,19 +19,28 @@ export default function Categories() {
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!name) return;
+    if (savingRef.current) return;
+    const trimmedName = name.trim();
+    if (trimmedName.length < 2) return toast.error('Informe ao menos 2 caracteres para a categoria');
+    savingRef.current = true;
+    setSaving(true);
     try {
       if (editing) {
-        await api.put(`/store/categories/${editing.id}`, { name });
+        await api.put(`/store/categories/${editing.id}`, { name: trimmedName });
         toast.success('Categoria atualizada!');
         setEditing(null);
       } else {
-        await api.post('/store/categories', { name });
+        await api.post('/store/categories', { name: trimmedName });
         toast.success('Categoria criada!');
       }
       setName('');
-      fetch();
-    } catch { toast.error('Erro'); }
+      await fetch();
+    } catch (error: any) {
+      toast.error(error?.response?.data?.error || 'Não foi possível salvar a categoria');
+    } finally {
+      savingRef.current = false;
+      setSaving(false);
+    }
   };
 
   const handleDelete = async (id: string) => {
@@ -47,8 +58,8 @@ export default function Categories() {
       <Card className="p-6">
         <form onSubmit={handleCreate} className="flex gap-3">
           <input value={name} onChange={e=>setName(e.target.value)} placeholder="Nova categoria (ex: Sofás, Mesas...)" className="flex-1 px-4 py-2.5 rounded-xl border border-gray-200 focus:ring-2 focus:ring-sky-500 outline-none" />
-          <Button type="submit">{editing ? 'Salvar' : <><Plus className="w-4 h-4 mr-2" /> Adicionar</>}</Button>
-          {editing && <Button type="button" variant="outline" onClick={()=>{setEditing(null); setName('');}}>Cancelar</Button>}
+          <Button type="submit" disabled={saving}>{saving ? 'Salvando...' : editing ? 'Salvar' : <><Plus className="w-4 h-4 mr-2" /> Adicionar</>}</Button>
+          {editing && <Button type="button" variant="outline" disabled={saving} onClick={()=>{setEditing(null); setName('');}}>Cancelar</Button>}
         </form>
       </Card>
 
