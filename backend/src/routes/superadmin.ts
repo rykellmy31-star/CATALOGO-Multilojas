@@ -241,15 +241,17 @@ superadmin.post('/stores/:id/admins', zValidator('json', storeAdminSchema), asyn
   const existing = await c.env.DB.prepare('SELECT id FROM users WHERE email = ?').bind(email).first();
   if (existing) return c.json({ error: 'Email já cadastrado' }, 409);
 
-  const store = await c.env.DB.prepare('SELECT id FROM stores WHERE id = ?').bind(storeId).first();
+  const store = await c.env.DB.prepare("SELECT id FROM stores WHERE id = ? AND status != 'deleted'").bind(storeId).first();
   if (!store) return c.json({ error: 'Loja não encontrada' }, 404);
 
   const hash = await hashPassword(password);
   const userId = crypto.randomUUID();
 
-  await c.env.DB.prepare(
-    'INSERT INTO users (id, name, email, password_hash, role, store_id) VALUES (?, ?, ?, ?, ?, ?)'
+  // A restrição UNIQUE cobre o intervalo entre a consulta e a inserção.
+  const inserted = await c.env.DB.prepare(
+    'INSERT INTO users (id, name, email, password_hash, role, store_id) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(email) DO NOTHING'
   ).bind(userId, name, email, hash, 'store_admin', storeId).run();
+  if (inserted.meta?.changes !== 1) return c.json({ error: 'Email já cadastrado' }, 409);
 
   const user = c.get('user');
   await c.env.DB.prepare(
