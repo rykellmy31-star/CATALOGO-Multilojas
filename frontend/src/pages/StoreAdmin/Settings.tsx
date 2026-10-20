@@ -45,6 +45,11 @@ export default function Settings() {
     const file = e.currentTarget.files?.[0];
     if (!file || uploadingLogoRef.current || savingRef.current) return;
     const input = e.currentTarget;
+    if (!['image/jpeg', 'image/jpg', 'image/png', 'image/webp', 'image/gif'].includes(file.type) ||
+        file.size === 0 || file.size > 10 * 1024 * 1024) {
+      input.value = '';
+      return toast.error('Use JPG, PNG, WEBP ou GIF de até 10 MB (arquivo não vazio).');
+    }
     const previousLogoUrl = store.logo_url;
     uploadingLogoRef.current = true;
     setUploadingLogo(true);
@@ -121,7 +126,7 @@ export default function Settings() {
               {store.logo_url ? <AdminImage url={store.logo_url} alt="Logo" className="w-20 h-20 rounded-xl border object-contain bg-white" /> : <div className="w-20 h-20 rounded-xl border-2 border-dashed flex items-center justify-center text-gray-400">Logo</div>}
               <label className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border bg-white hover:bg-gray-50 cursor-pointer text-sm font-medium">
                 <Upload className="w-4 h-4" /> Enviar Logo
-                <input type="file" accept="image/*" className="hidden" disabled={uploadingLogo || saving} onChange={handleLogoUpload} />
+                <input type="file" accept="image/jpeg,image/png,image/webp,image/gif" className="hidden" disabled={uploadingLogo || saving} onChange={handleLogoUpload} />
               </label>
               <input placeholder="Ou cole URL" value={store.logo_url || ''} onChange={e=>setStore({...store, logo_url: e.target.value})} className="flex-1 px-4 py-2 rounded-xl border border-gray-200 focus:ring-2 focus:ring-sky-500 outline-none" />
             </div>
