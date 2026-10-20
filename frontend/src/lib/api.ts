@@ -13,10 +13,10 @@ api.interceptors.request.use((config) => {
     || (typeof config.headers.has === 'function' && config.headers.has('Authorization'));
   if (token && !explicitAuth) config.headers.Authorization = `Bearer ${token}`;
   
-  // Session ID para analytics
+  // Identificador gerado criptograficamente; o servidor armazena somente seu HMAC.
   let sessionId = localStorage.getItem('sessionId');
-  if (!sessionId) {
-    sessionId = Math.random().toString(36).substring(2, 15);
+  if (!sessionId || !/^[a-z0-9_-]{1,128}$/i.test(sessionId) || sessionId === 'anon') {
+    sessionId = crypto.randomUUID().replace(/-/g, '');
     localStorage.setItem('sessionId', sessionId);
   }
   config.headers['X-Session-Id'] = sessionId;
