@@ -5,9 +5,10 @@ import { zValidator } from '../middleware/validation.js';
 import { createStoreSchema, storeAdminSchema, publicLinkSchema } from '../utils/validation.js';
 import { hashPassword } from '../utils/hash.js';
 import { slugify } from '../utils/slug.js';
+import { auditStoreStorage, validateStorageAuditOptions } from '../utils/storageAudit.js';
 
 type Env = {
-  Bindings: { DB: D1Database; JWT_SECRET: string; };
+  Bindings: { DB: D1Database; STORAGE: R2Bucket; JWT_SECRET: string; };
   Variables: { user: any; };
 };
 
@@ -107,6 +108,26 @@ superadmin.post('/stores', zValidator('json', createStoreSchema), async (c) => {
 
   const store = await c.env.DB.prepare('SELECT * FROM stores WHERE id = ?').bind(storeId).first();
   return c.json({ store, message: 'Loja criada com sucesso!' }, 201);
+});
+
+// GET /api/superadmin/stores/:id/storage-audit - consulta sem exclusão.
+superadmin.get('/stores/:id/storage-audit', async (c) => {
+  const storeId = c.req.param('id');
+  const cursor = c.req.query('cursor');
+  const rawLimit = c.req.query('limit');
+  const limit = rawLimit === undefined ? undefined : Number(rawLimit);
+  if (!validateStorageAuditOptions({ cursor, limit }) ||
+      (rawLimit !== undefined && !/^[1-9][0-9]{0,2}$/.test(rawLimit))) {
+    return c.json({ error: 'Paginação de auditoria inválida' }, 400);
+  }
+  try {
+    const result = await auditStoreStorage(c.env.DB, c.env.STORAGE, storeId, { cursor, limit });
+    if (!result) return c.json({ error: 'Loja não encontrada' }, 404);
+    c.header('Cache-Control', 'no-store');
+    return c.json(result);
+  } catch {
+    return c.json({ error: 'Não foi possível auditar o armazenamento' }, 503);
+  }
 });
 
 // GET /api/superadmin/stores/:id
