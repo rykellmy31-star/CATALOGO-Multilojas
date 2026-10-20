@@ -107,12 +107,17 @@ export default function Catalog() {
     if (nextBannerTransitionAt) {
       const transitionTime = Date.parse(nextBannerTransitionAt);
       if (Number.isFinite(transitionTime)) {
-        // Um pequeno intervalo após o evento evita executar antes do relógio
-        // do SQLite; limitar timeout evita overflow em datas muito futuras.
-        const delay = Math.max(1000, Math.min(
-          transitionTime - Date.now() + 1000, 2_147_000_000
-        ));
-        transitionTimer = window.setTimeout(() => refreshBanners(true), delay);
+        const scheduleTransition = () => {
+          // setTimeout possui limite de ~24 dias. Para datas muito distantes,
+          // aguardar em etapas SEM consultar a API até chegar ao horário real.
+          const remaining = transitionTime - Date.now() + 1000;
+          const delay = Math.max(1000, Math.min(remaining, 2_147_000_000));
+          transitionTimer = window.setTimeout(() => {
+            if (Date.now() < transitionTime) scheduleTransition();
+            else refreshBanners(true);
+          }, delay);
+        };
+        scheduleTransition();
       }
     }
     window.addEventListener('focus', refreshOnFocus);
