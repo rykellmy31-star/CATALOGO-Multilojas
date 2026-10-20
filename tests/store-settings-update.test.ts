@@ -89,6 +89,39 @@ describe('Configurações da loja: gravação a partir do painel administrativo'
       expect(current().name).toBe('Loja A');
     });
 
+  it('rejeita campos de texto com tipo inválido antes de gravar no D1', async () => {
+    f = fixture();
+    const response = await send({ name: { unexpected: 'objeto' }, whatsapp: ['invalido'] });
+    expect(response.status).toBe(400);
+    expect(current().name).toBe('Loja A');
+  });
+
+  it('recusa URL malformada e mantém alterações anteriores', async () => {
+    f = fixture();
+    const response = await send({ name: 'Não alterar', website: 'javascript:alert(1)' });
+    expect(response.status).toBe(400);
+    expect(current().name).toBe('Loja A');
+  });
+
+  it('não permite alterar plano, cotas ou identificação pelo formulário da loja', async () => {
+    f = fixture();
+    const before = current();
+    const response = await send({
+      name: 'Nome editável', id: 'b', store_id: 'b',
+      plan: 'enterprise', storage_limit_mb: 99999,
+      ai_enabled: false, ai_daily_limit: 5000
+    });
+    expect(response.status).toBe(200);
+    expect(current()).toMatchObject({
+      id: 'a', name: 'Nome editável', plan: before.plan,
+      storage_limit_mb: before.storage_limit_mb,
+      ai_enabled: before.ai_enabled, ai_daily_limit: before.ai_daily_limit
+    });
+    expect(f!.db.prepare("SELECT name FROM stores WHERE id='b'").get()).toMatchObject({
+      name: 'Loja B'
+    });
+  });
+
   it('administrador A não altera marca ou nome da loja B', async () => {
     f = fixture();
     const before = f.db.prepare("SELECT name,logo_url FROM stores WHERE id='b'").get();
