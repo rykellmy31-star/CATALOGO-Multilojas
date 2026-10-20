@@ -133,6 +133,15 @@ export async function auditStoreStorage(
       next_cursor: page.truncated ? page.cursor : null
     },
     complete_store_scan: !page.truncated && !options.cursor,
+    reconciliation: {
+      // Uma única página inicial pode abranger todo o prefixo. Caso contrário
+      // não comparar bytes parciais contra o contador completo da loja.
+      is_complete_snapshot: !page.truncated && !options.cursor,
+      actual_r2_mb: !page.truncated && !options.cursor ? totalBytes / MIB : null,
+      difference_mb: !page.truncated && !options.cursor
+        ? totalBytes / MIB - Number(store.storage_used_mb ?? 0) : null,
+      automatic_adjustment: false
+    },
     warning: 'Candidatos são apenas sugestões de revisão, não objetos seguros para exclusão. A quota não foi alterada.'
   };
 }
