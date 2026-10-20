@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import { authMiddleware, requireRole } from '../middleware/auth.js';
 import { zValidator } from '../middleware/validation.js';
-import { createProductSchema, createCategorySchema, createBrandSchema, createBannerSchema, publicLinkSchema, aiGenerateSchema } from '../utils/validation.js';
+import { createProductSchema, createCategorySchema, createBrandSchema, createBannerSchema, publicLinkSchema, aiGenerateSchema, updateStoreSettingsSchema } from '../utils/validation.js';
 import { slugify } from '../utils/slug.js';
 import { resolveAIInputImage } from '../utils/aiImage.js';
 import { isOwnedStorageImageUrl, areOwnedStorageImages } from '../utils/imageOwnership.js';
@@ -640,12 +640,9 @@ store.get('/settings', async (c) => {
   return c.json({ store: storeData });
 });
 
-store.put('/settings', async (c) => {
+store.put('/settings', zValidator('json', updateStoreSettingsSchema), async (c) => {
   const storeId = getStoreId(c);
-  const data = await c.req.json().catch(() => null);
-  if (!data || typeof data !== 'object' || Array.isArray(data)) {
-    return c.json({ error: 'Configurações inválidas' }, 400);
-  }
+  const data = c.req.valid('json');
   // O formulário envia o registro inteiro, incluindo logo_url/banner_url
   // nulos enquanto não há imagem. NULL também permite limpar a marca.
   for (const field of ['logo_url', 'banner_url'] as const) {
