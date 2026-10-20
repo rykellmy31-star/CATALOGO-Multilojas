@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import api, { getImageUrl } from '../../lib/api';
 import { Card, Button, Input, Textarea } from '../../components/ui/Button';
 import { Save, Upload, ExternalLink, Palette } from 'lucide-react';
@@ -8,23 +8,60 @@ export default function Settings() {
   const [store, setStore] = useState<any>({});
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [uploadingLogo, setUploadingLogo] = useState(false);
+  const savingRef = useRef(false);
+  const uploadingLogoRef = useRef(false);
 
   useEffect(()=>{
     api.get('/store/settings').then(r=>setStore(r.data.store)).catch(()=>{}).finally(()=>setLoading(false));
   },[]);
 
   const handleSave = async () => {
+    if (savingRef.current) return;
+    if (uploadingLogoRef.current) {
+      toast.error('Aguarde o envio da logomarca terminar.');
+      return;
+    }
+    savingRef.current = true;
     setSaving(true);
-    try { const { data } = await api.put('/store/settings', store); setStore(data.store); toast.success('Configurações salvas!'); } 
-    catch (e:any) { toast.error(e.response?.data?.error || 'Erro ao salvar'); } finally { setSaving(false); }
+    const submittedStore = { ...store };
+    try {
+      const { data } = await api.put('/store/settings', submittedStore);
+      // Uma resposta antiga não pode apagar alterações feitas enquanto salvava.
+      setStore(current => Object.keys(submittedStore).some(key => current[key] !== submittedStore[key])
+        ? current : data.store);
+      toast.success('Configurações salvas!');
+    } catch (e: any) {
+      toast.error(e.response?.data?.error || 'Erro ao salvar');
+    } finally {
+      savingRef.current = false;
+      setSaving(false);
+    }
   };
 
   const handleLogoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+    const file = e.currentTarget.files?.[0];
+    if (!file || uploadingLogoRef.current || savingRef.current) return;
+    const input = e.currentTarget;
+    const previousLogoUrl = store.logo_url;
+    uploadingLogoRef.current = true;
+    setUploadingLogo(true);
     const fd = new FormData();
     fd.append('file', file);
-    try { const { data } = await api.post('/upload', fd, { headers: { 'Content-Type':'multipart/form-data' } }); setStore({...store, logo_url: data.url}); toast.success('Logo enviada! Clique em Salvar.'); } catch { toast.error('Erro upload'); }
+    try {
+      const { data } = await api.post('/upload', fd, { headers: { 'Content-Type': 'multipart/form-data' } });
+      if (!data?.url || typeof data.url !== 'string') throw new Error('URL da imagem ausente');
+      // Preserva edições feitas durante o upload, inclusive uma URL colada manualmente.
+      setStore(current => current.logo_url === previousLogoUrl
+        ? { ...current, logo_url: data.url } : current);
+      toast.success('Logo enviada! Clique em Salvar.');
+    } catch {
+      toast.error('Erro ao enviar a logomarca');
+    } finally {
+      uploadingLogoRef.current = false;
+      setUploadingLogo(false);
+      input.value = '';
+    }
   };
 
   if (loading) return <div className="h-64 bg-gray-100 rounded-2xl animate-pulse" />;
@@ -56,7 +93,7 @@ export default function Settings() {
               {store.logo_url ? <img src={getImageUrl(store.logo_url)} alt="Logo" className="w-20 h-20 rounded-xl border object-contain bg-white" /> : <div className="w-20 h-20 rounded-xl border-2 border-dashed flex items-center justify-center text-gray-400">Logo</div>}
               <label className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border bg-white hover:bg-gray-50 cursor-pointer text-sm font-medium">
                 <Upload className="w-4 h-4" /> Enviar Logo
-                <input type="file" accept="image/*" className="hidden" onChange={handleLogoUpload} />
+                <input type="file" accept="image/*" className="hidden" disabled={uploadingLogo || saving} onChange={handleLogoUpload} />
               </label>
               <input placeholder="Ou cole URL" value={store.logo_url || ''} onChange={e=>setStore({...store, logo_url: e.target.value})} className="flex-1 px-4 py-2 rounded-xl border border-gray-200 focus:ring-2 focus:ring-sky-500 outline-none" />
             </div>
@@ -127,7 +164,7 @@ export default function Settings() {
         </div>
       </Card>
 
-      <Button onClick={handleSave} loading={saving} size="lg" className="w-full">
+      <Button onClick={handleSave} loading={saving} disabled={uploadingLogo} size="lg" className="w-full">
         <Save className="w-4 h-4 mr-2" /> Salvar Todas as Configurações
       </Button>
     </div>
