@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import api from '../../lib/api';
 import AdminImage from '../../components/AdminImage';
 import { Card, Button, Input } from '../../components/ui/Button';
@@ -8,23 +8,78 @@ import { toast } from 'sonner';
 export default function Banners() {
   const [banners, setBanners] = useState<any[]>([]);
   const [form, setForm] = useState({ title: '', subtitle: '', image_url: '', button_text: '', link_url: '' });
+  const [uploading, setUploading] = useState(false);
+  const [creating, setCreating] = useState(false);
+  const uploadController = useRef<AbortController | null>(null);
+  const createInFlight = useRef(false);
   const fetch = async () => { try { const { data } = await api.get('/store/banners'); setBanners(data.banners || []); } catch {} };
-  useEffect(()=>{fetch();},[]);
+  useEffect(() => {
+    fetch();
+    return () => { uploadController.current?.abort(); };
+  }, []);
+
+  const cancelUpload = () => {
+    uploadController.current?.abort();
+    uploadController.current = null;
+    setUploading(false);
+  };
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!form.image_url) return toast.error('Imagem obrigatória');
-    try { await api.post('/store/banners', { ...form, position: 'hero' }); toast.success('Banner criado!'); setForm({ title:'', subtitle:'', image_url:'', button_text:'', link_url:'' }); fetch(); } catch { toast.error('Erro'); }
+    if (createInFlight.current) return;
+    if (uploading || uploadController.current) return toast.error('Aguarde o envio da imagem terminar');
+    if (!form.image_url.trim()) return toast.error('Imagem obrigatória');
+    createInFlight.current = true;
+    setCreating(true);
+    try {
+      await api.post('/store/banners', { ...form, position: 'hero' });
+      toast.success('Banner criado!');
+      setForm({ title:'', subtitle:'', image_url:'', button_text:'', link_url:'' });
+      await fetch();
+    } catch { toast.error('Erro ao criar banner'); }
+    finally {
+      createInFlight.current = false;
+      setCreating(false);
+    }
   };
   const handleDelete = async (id: string) => {
     if (!confirm('Excluir banner?')) return;
     try { await api.delete(`/store/banners/${id}`); toast.success('Removido'); fetch(); } catch { toast.error('Erro'); }
   };
   const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+    const input = e.currentTarget;
+    const file = input.files?.[0];
+    if (!file || createInFlight.current) return;
+    cancelUpload();
+    if (!['image/jpeg', 'image/jpg', 'image/png', 'image/webp', 'image/gif'].includes(file.type)) {
+      input.value = '';
+      return toast.error('Use JPG, PNG, WEBP ou GIF');
+    }
+    if (file.size > 10 * 1024 * 1024) {
+      input.value = '';
+      return toast.error('Imagem acima de 10 MB');
+    }
+    const controller = new AbortController();
+    uploadController.current = controller;
+    setUploading(true);
     const fd = new FormData();
     fd.append('file', file);
-    try { const { data } = await api.post('/upload', fd, { headers: { 'Content-Type':'multipart/form-data' } }); setForm({...form, image_url: data.url}); toast.success('Imagem enviada!'); } catch { toast.error('Erro upload'); }
+    try {
+      const { data } = await api.post('/upload', fd, {
+        headers: { 'Content-Type': 'multipart/form-data' }, signal: controller.signal
+      });
+      if (controller.signal.aborted) return;
+      if (typeof data?.url !== 'string' || !data.url) throw new Error('URL ausente');
+      setForm(previous => ({ ...previous, image_url: data.url }));
+      toast.success('Imagem enviada!');
+    } catch {
+      if (!controller.signal.aborted) toast.error('Erro no envio da imagem');
+    } finally {
+      if (uploadController.current === controller) {
+        uploadController.current = null;
+        setUploading(false);
+      }
+      input.value = '';
+    }
   };
   return (
     <div className="space-y-6">
@@ -41,20 +96,20 @@ export default function Banners() {
           </div>
           <div>
             <label className="text-sm font-medium text-gray-700">Imagem (1200x500 recomendado)</label>
-            {form.image_url ? <div className="mt-2 relative"><AdminImage url={form.image_url} alt="" className="w-full h-32 object-cover rounded-xl border" /><button type="button" onClick={()=>setForm({...form, image_url:''})} className="absolute top-2 right-2 p-1 rounded-full bg-white shadow text-red-600">✕</button></div> : null}
+            {form.image_url ? <div className="mt-2 relative"><AdminImage url={form.image_url} alt="Prévia do banner" className="w-full h-32 object-cover rounded-xl border" /><button type="button" disabled={creating} onClick={()=>{ cancelUpload(); setForm(previous => ({ ...previous, image_url:'' })); }} className="absolute top-2 right-2 p-1 rounded-full bg-white shadow text-red-600 disabled:opacity-50">✕</button></div> : null}
             <div className="mt-2 flex gap-2">
               <label className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border-2 border-dashed hover:bg-gray-50 cursor-pointer text-sm font-medium">
                 <ImageIcon className="w-4 h-4" /> Enviar imagem
-                <input type="file" accept="image/*" className="hidden" onChange={handleUpload} />
+                <input type="file" accept="image/jpeg,image/png,image/webp,image/gif" disabled={creating} className="hidden" onChange={handleUpload} />
               </label>
-              <input placeholder="Ou cole URL da imagem" value={form.image_url} onChange={e=>setForm({...form, image_url: e.target.value})} className="flex-1 px-4 py-2.5 rounded-xl border border-gray-200 focus:ring-2 focus:ring-sky-500 outline-none" />
+              <input placeholder="Ou cole URL da imagem" value={form.image_url} disabled={creating} onChange={e=>{ cancelUpload(); setForm(previous => ({ ...previous, image_url: e.target.value })); }} className="flex-1 px-4 py-2.5 rounded-xl border border-gray-200 focus:ring-2 focus:ring-sky-500 outline-none" />
             </div>
           </div>
           <div className="grid sm:grid-cols-2 gap-4">
             <Input label="Texto do botão" placeholder="Ver Ofertas" value={form.button_text} onChange={e=>setForm({...form, button_text: e.target.value})} />
             <Input label="Link" placeholder="/loja/sua-loja?filter=promo" value={form.link_url} onChange={e=>setForm({...form, link_url: e.target.value})} />
           </div>
-          <Button type="submit"><Plus className="w-4 h-4 mr-2" /> Criar Banner</Button>
+          <Button type="submit" disabled={uploading || creating}><Plus className="w-4 h-4 mr-2" /> {uploading ? 'Enviando imagem...' : creating ? 'Salvando...' : 'Criar Banner'}</Button>
         </form>
       </Card>
       <div className="grid gap-4">
