@@ -276,7 +276,25 @@ store.put('/products/:id', zValidator('json', createProductSchema.partial()), as
   if (data.status === 'published' && existing.status !== 'published') {
     updates.push("published_at = datetime('now')");
   }
-  
+
+  // Conflitos só podem ser revelados dentro da loja autenticada.
+  // As constraints UNIQUE continuam garantindo integridade sob concorrência.
+  const proposedSlug = data.slug
+    ? slugify(data.slug)
+    : data.name && data.name !== existing.name ? slugify(data.name) : null;
+  if (proposedSlug && proposedSlug !== existing.slug) {
+    const taken = await c.env.DB.prepare(
+      'SELECT id FROM products WHERE store_id = ? AND slug = ? AND id != ?'
+    ).bind(storeId, proposedSlug, id).first();
+    if (taken) return c.json({ error: 'Endereço do produto já utilizado nesta loja' }, 409);
+  }
+  if (data.sku && data.sku !== existing.sku) {
+    const taken = await c.env.DB.prepare(
+      'SELECT id FROM products WHERE store_id = ? AND sku = ? AND id != ?'
+    ).bind(storeId, data.sku, id).first();
+    if (taken) return c.json({ error: 'SKU já utilizado nesta loja' }, 409);
+  }
+
   if (updates.length === 0 && data.images === undefined) {
     return c.json({ error: 'Nenhum campo para atualizar' }, 400);
   }
@@ -326,7 +344,22 @@ store.put('/products/:id', zValidator('json', createProductSchema.partial()), as
     }
   }
 
-  if (statements.length > 0) await c.env.DB.batch(statements);
+  if (statements.length > 0) {
+    try {
+      await c.env.DB.batch(statements);
+    } catch (error) {
+      const reason = String(error).toLowerCase();
+      // Inclui o caso em que outro administrador reservou o SKU/slug entre
+      // a consulta inicial e o UPDATE. D1.batch mantém a transação íntegra.
+      if (reason.includes('unique constraint failed: products.store_id, products.sku')) {
+        return c.json({ error: 'SKU já utilizado nesta loja' }, 409);
+      }
+      if (reason.includes('unique constraint failed: products.store_id, products.slug')) {
+        return c.json({ error: 'Endereço do produto já utilizado nesta loja' }, 409);
+      }
+      throw error;
+    }
+  }
 
   await c.env.DB.prepare(
     'INSERT INTO audit_logs (user_id, store_id, action, entity_type, entity_id, details) VALUES (?, ?, ?, ?, ?, ?)'
