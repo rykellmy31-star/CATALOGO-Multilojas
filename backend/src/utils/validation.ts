@@ -21,7 +21,8 @@ export const setupSuperAdminSchema = z.object({
 
 export const createStoreSchema = z.object({
   name: z.string().min(2, 'Nome obrigatório'),
-  slug: z.string().min(2).optional(),
+  // O formulário permite deixar o slug vazio para gerá-lo pelo nome.
+  slug: z.string().min(2).optional().or(z.literal('')),
   description: z.string().optional(),
   whatsapp: z.string().optional(),
   email: z.string().email().optional().or(z.literal('')),
