@@ -33,10 +33,10 @@ function Protected({ children, role }: { children: React.ReactNode; role?: 'supe
 }
 
 function AppRoutes() {
-  const { user } = useAuth();
+  const { user, loading } = useAuth();
   return (
     <Routes>
-      <Route path="/" element={user ? (user.role === 'super_admin' ? <Navigate to="/super-admin" /> : <Navigate to="/admin" />) : <Navigate to="/login" />} />
+      <Route path="/" element={loading ? <div className="min-h-screen bg-gray-50 flex items-center justify-center"><div className="w-8 h-8 border-2 border-sky-600 border-t-transparent rounded-full animate-spin" /></div> : user ? (user.role === 'super_admin' ? <Navigate to="/super-admin" /> : <Navigate to="/admin" />) : <Navigate to="/login" />} />
       <Route path="/login" element={<Login />} />
       <Route path="/setup" element={<Setup />} />
 
