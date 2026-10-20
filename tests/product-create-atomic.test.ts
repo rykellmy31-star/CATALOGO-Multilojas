@@ -35,6 +35,23 @@ describe('Cadastro atômico multiempresa', () => {
     expect(count('product_images')).toBe(0);
   });
 
+  it('URLs repetidas no cadastro geram uma única foto por endereço', async () => {
+    f = fixture();
+    const result = await create({
+      name: 'Móvel com fotos duplicadas', price: 199,
+      images: [images[0], images[0], images[1], images[1]]
+    });
+    expect(result.status).toBe(201);
+    const { product } = await result.json() as any;
+    const rows = f.db.prepare(
+      'SELECT url, is_primary, sort_order FROM product_images WHERE product_id = ? ORDER BY sort_order'
+    ).all(product.id);
+    expect(rows).toEqual([
+      { url: images[0], is_primary: 1, sort_order: 0 },
+      { url: images[1], is_primary: 0, sort_order: 1 }
+    ]);
+  });
+
   it('conflitos de nome geram slugs distintos sem misturar imagens', async () => {
     f = fixture();
     const first = await create({ name: 'Mesmo nome', price: 10, images });
