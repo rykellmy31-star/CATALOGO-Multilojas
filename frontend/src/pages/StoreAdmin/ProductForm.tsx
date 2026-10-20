@@ -31,6 +31,7 @@ export default function ProductForm() {
   const galleryControllerRef = useRef<AbortController | null>(null);
   const aiGeneratingRef = useRef(false);
   const aiRequestEpochRef = useRef(0);
+  const aiIdempotencyRef = useRef<{ signature: string; requestId: string } | null>(null);
   const applyingAIRef = useRef(false);
   const aiUploadRef = useRef<{ sequence: number; pending: boolean; controller: AbortController | null }>({
     sequence: 0, pending: false, controller: null
@@ -57,6 +58,7 @@ export default function ProductForm() {
     const controller = new AbortController();
     // Troca de produto invalida requisições pendentes e resultados da IA anterior.
     aiRequestEpochRef.current++;
+    aiIdempotencyRef.current = null;
     galleryControllerRef.current?.abort();
     galleryControllerRef.current = null;
     galleryUploadingRef.current = false;
@@ -271,12 +273,22 @@ export default function ProductForm() {
     if (aiGeneratingRef.current) return;
     aiGeneratingRef.current = true;
     const epoch = aiRequestEpochRef.current;
+    // Reaproveita a chave após perda de conexão; não repete a operação no servidor.
+    const signature = JSON.stringify([id || null, aiImage, aiStyle, true, true]);
+    if (aiIdempotencyRef.current?.signature !== signature) {
+      aiIdempotencyRef.current = { signature, requestId: crypto.randomUUID() };
+    }
+    const requestId = aiIdempotencyRef.current.requestId;
     setAiLoading(true);
     setAiError('');
     setAiResult(null);
     try {
-      const { data } = await api.post('/store/ai/generate', { image_url: aiImage, style: aiStyle, product_id: id || undefined });
+      const { data } = await api.post('/store/ai/generate', {
+        image_url: aiImage, style: aiStyle, product_id: id || undefined,
+        request_id: requestId
+      });
       if (epoch !== aiRequestEpochRef.current) return;
+      aiIdempotencyRef.current = null;
       setAiResult(data.generation);
       if (data.generation?.imageError) {
         setAiError(data.generation.imageError);
@@ -286,9 +298,16 @@ export default function ProductForm() {
       }
     } catch (err: any) {
       if (epoch !== aiRequestEpochRef.current) return;
-      const msg = err.response?.data?.message || err.response?.data?.error || 'Erro ao gerar';
+      const status = err.response?.status;
+      const msg = status === 409
+        ? 'Esta solicitação já foi recebida. Confira o histórico da IA antes de tentar outra.'
+        : err.response?.data?.message || err.response?.data?.error || 'Não foi possível confirmar a geração. Confira o histórico da IA.';
+      // Apenas erros de validação/limite, anteriores à geração, permitem nova chave.
+      if ([400, 403, 404, 413, 422, 429].includes(status)) {
+        aiIdempotencyRef.current = null;
+      }
       setAiError(msg);
-      if (err.response?.status === 503) {
+      if (status === 503) {
         toast.error('IA não configurada. Configure a chave OpenAI.');
       } else {
         toast.error(msg);
