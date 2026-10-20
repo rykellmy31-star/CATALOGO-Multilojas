@@ -26,7 +26,15 @@ publicRoutes.get('/stores/:slug', async (c) => {
   if (!store) return c.json({ error: 'Loja não encontrada' }, 404);
 
   // Banners ativos
-  const banners = await c.env.DB.prepare('SELECT * FROM banners WHERE store_id = ? AND is_active = 1 ORDER BY sort_order').bind(store.id).all();
+  const banners = await c.env.DB.prepare(`
+    SELECT id, store_id, title, subtitle, image_url, link_url, button_text,
+      position, sort_order, starts_at, ends_at
+    FROM banners
+    WHERE store_id = ? AND is_active = 1
+      AND (starts_at IS NULL OR julianday(starts_at) <= julianday('now'))
+      AND (ends_at IS NULL OR julianday(ends_at) > julianday('now'))
+    ORDER BY sort_order, created_at DESC, id
+  `).bind(store.id).all();
   
   // Categorias
   const categories = await c.env.DB.prepare('SELECT * FROM categories WHERE store_id = ? AND is_active = 1 ORDER BY sort_order, name').bind(store.id).all();
