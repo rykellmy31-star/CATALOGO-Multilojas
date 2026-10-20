@@ -93,6 +93,7 @@ export const createBannerSchema = z.object({
 });
 
 export const aiGenerateSchema = z.object({
+  request_id: z.string().uuid().optional(),
   product_id: z.string().optional(),
   image_url: publicLinkSchema.refine(value => value.length > 0, 'Imagem obrigatória'),
   style: z.enum(['modern_room', 'white_background', 'promotional', 'premium_catalog']).default('modern_room'),
