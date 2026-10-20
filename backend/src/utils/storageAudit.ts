@@ -96,7 +96,7 @@ export async function auditStoreStorage(
       continue;
     }
     unreferencedCount++;
-    const uploaded = new Date(object.uploaded);
+    const uploaded = object.uploaded instanceof Date ? object.uploaded : new Date(String(object.uploaded));
     if (!Number.isFinite(uploaded.getTime())) {
       unknownAgeCount++;
       continue;
