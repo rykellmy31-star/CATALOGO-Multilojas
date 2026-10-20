@@ -623,8 +623,8 @@ store.post('/ai/generate', zValidator('json', aiGenerateSchema), async (c) => {
     return c.json({ error: resolvedImage.error }, resolvedImage.status);
   }
   const aiImageUrl = resolvedImage.url;
-  if (generate_image && !aiImageUrl.startsWith('data:image/')) {
-    return c.json({ error: 'Envie a foto ao armazenamento da loja antes de editá-la com IA' }, 400);
+  if (generate_image && !/^data:image\/(?:png|jpeg|webp);base64,/.test(aiImageUrl)) {
+    return c.json({ error: 'Para editar com IA, envie uma foto JPG, PNG ou WebP para esta loja' }, 400);
   }
 
   // A reserva é atômica: duas requisições não podem ultrapassar as cotas
