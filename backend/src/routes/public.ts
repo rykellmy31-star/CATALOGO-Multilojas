@@ -186,17 +186,22 @@ publicRoutes.get('/stores/:slug/products/:productSlug', async (c) => {
     await recordUniquePublicView(c.env.DB, 'product_view', store.id, product.id, sessionId, c.env.JWT_SECRET).catch(() => {});
   }
 
-  // WhatsApp link helper
-  const whatsappNumber = store.whatsapp ? store.whatsapp.replace(/\D/g, '') : '';
-  const displayPrice = product.promotional_price != null && product.promotional_price < product.price ? product.promotional_price : product.price;
-  const whatsappMessage = `Olá! Tenho interesse no produto: ${product.name} (Código: ${product.sku || product.id.slice(0,8)}) - Preço: R$ ${Number(displayPrice).toFixed(2)} - Link: /loja/${slug}/produto/${product.slug}`;
+  // O link compartilhado precisa conter a URL completa do catálogo e preço
+  // atualizado deve ser consultado no site, não fixado em uma mensagem antiga.
+  const whatsappNumber = typeof store.whatsapp === 'string' ? store.whatsapp.replace(/\D/g, '') : '';
+  const validWhatsApp = /^[1-9]\d{9,14}$/.test(whatsappNumber);
+  const productUrl = new URL(
+    `/loja/${encodeURIComponent(store.slug)}/produto/${encodeURIComponent(product.slug)}`,
+    new URL(c.req.url).origin
+  ).toString();
+  const whatsappMessage = `Olá! Tenho interesse no produto: ${product.name} (Código: ${product.sku || product.id.slice(0, 8)}). Link: ${productUrl}. Poderia confirmar o preço e a disponibilidade atualizados?`;
 
   return c.json({
     product,
     images: (images as any).results || images,
     related: (related as any).results || related,
     store: { name: store.name, slug: store.slug, whatsapp: store.whatsapp, phone: store.phone },
-    whatsappLink: whatsappNumber ? `https://wa.me/${whatsappNumber}?text=${encodeURIComponent(whatsappMessage)}` : null
+    whatsappLink: validWhatsApp ? `https://wa.me/${whatsappNumber}?text=${encodeURIComponent(whatsappMessage)}` : null
   });
 });
 
