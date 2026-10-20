@@ -201,13 +201,24 @@ store.post('/products', zValidator('json', createProductSchema), async (c) => {
   const createBatch = (candidateSlug: string) => {
     const statements: D1PreparedStatement[] = [insertProduct(candidateSlug)];
     for (const [index, url] of (data.images || []).entries()) {
-      // Uma tentativa sem INSERT (slug repetido) não pode inserir fotos órfãs.
+      // Marcar imagens de IA somente quando pertencem a uma geração concluída
+      // da MESMA loja. Produto e imagens continuam no mesmo batch D1.
       statements.push(c.env.DB.prepare(`
-        INSERT INTO product_images (id, product_id, store_id, url, is_primary, sort_order)
-        SELECT ?, ?, ?, ?, ?, ?
-        WHERE EXISTS (SELECT 1 FROM products WHERE id = ? AND store_id = ?)
-      `).bind(crypto.randomUUID(), productId, storeId, url, index === 0 ? 1 : 0,
-        index, productId, storeId));
+        INSERT INTO product_images
+          (id, product_id, store_id, url, is_primary, sort_order, is_ai_generated, ai_style)
+        SELECT ?, p.id, p.store_id, ?, ?, ?,
+          CASE WHEN g.id IS NULL THEN 0 ELSE 1 END,
+          CASE WHEN g.ai_style IN ('modern_room', 'white_background', 'promotional', 'premium_catalog')
+            THEN g.ai_style ELSE NULL END
+        FROM products AS p
+        LEFT JOIN ai_generations AS g
+          ON g.store_id = p.store_id
+         AND g.generated_image_url = ?
+         AND g.status = 'completed'
+        WHERE p.id = ? AND p.store_id = ?
+        LIMIT 1
+      `).bind(crypto.randomUUID(), url, index === 0 ? 1 : 0,
+        index, url, productId, storeId));
     }
     return c.env.DB.batch(statements);
   };
