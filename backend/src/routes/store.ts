@@ -560,7 +560,7 @@ store.put('/categories/:id', zValidator('json', createCategorySchema.partial()),
   }
 
   const updates: string[] = [];
-  const params: unknown[] = [];
+  const params: any[] = [];
   if (data.name !== undefined) { updates.push('name = ?'); params.push(data.name); }
   if (data.slug || data.name !== undefined) {
     const slug = slugify(data.slug || data.name || '');
@@ -614,12 +614,20 @@ store.get('/brands', async (c) => {
 store.post('/brands', zValidator('json', createBrandSchema), async (c) => {
   const storeId = getStoreId(c);
   const data = c.req.valid('json');
-  if (!await validRelations(c, data, storeId)) return c.json({ error: 'Referência não pertence à loja' }, 400);
-  const slug = data.slug ? slugify(data.slug) : slugify(data.name);
+  const slug = slugify(data.slug || data.name);
+  if (!slug) return c.json({ error: 'Nome ou endereço inválido para a marca' }, 400);
+
   const id = crypto.randomUUID();
-  await c.env.DB.prepare('INSERT INTO brands (id, store_id, name, slug, description) VALUES (?, ?, ?, ?, ?)').bind(id, storeId, data.name, slug, data.description || null).run();
-  const brand = await c.env.DB.prepare('SELECT * FROM brands WHERE id = ? AND store_id = ?').bind(id, storeId).first();
-  if (!brand) return c.json({ error: 'Recurso não encontrado' }, 404);
+  const result = await c.env.DB.prepare(`
+    INSERT INTO brands (id, store_id, name, slug, description)
+    VALUES (?, ?, ?, ?, ?)
+    ON CONFLICT(store_id, slug) DO NOTHING
+  `).bind(id, storeId, data.name, slug, data.description || null).run();
+  if (result.meta?.changes !== 1) {
+    return c.json({ error: 'Endereço de marca já utilizado nesta loja' }, 409);
+  }
+  const brand = await c.env.DB.prepare('SELECT * FROM brands WHERE id = ? AND store_id = ?')
+    .bind(id, storeId).first();
   return c.json({ brand, message: 'Marca criada!' }, 201);
 });
 
@@ -627,24 +635,47 @@ store.put('/brands/:id', zValidator('json', createBrandSchema.partial()), async 
   const storeId = getStoreId(c);
   const id = c.req.param('id');
   const data = c.req.valid('json');
-  if (!await validRelations(c, data, storeId)) return c.json({ error: 'Referência não pertence à loja' }, 400);
+
+  const existing = await c.env.DB.prepare('SELECT id FROM brands WHERE id = ? AND store_id = ?')
+    .bind(id, storeId).first();
+  if (!existing) return c.json({ error: 'Marca não encontrada' }, 404);
+
   const updates: string[] = [];
   const params: any[] = [];
-  if (data.name) { updates.push('name = ?'); params.push(data.name); updates.push('slug = ?'); params.push(slugify(data.slug || data.name)); }
+  if (data.name !== undefined) { updates.push('name = ?'); params.push(data.name); }
+  if (data.slug || data.name !== undefined) {
+    const slug = slugify(data.slug || data.name || '');
+    if (!slug) return c.json({ error: 'Nome ou endereço inválido para a marca' }, 400);
+    const taken = await c.env.DB.prepare(
+      'SELECT id FROM brands WHERE store_id = ? AND slug = ? AND id != ?'
+    ).bind(storeId, slug, id).first();
+    if (taken) return c.json({ error: 'Endereço de marca já utilizado nesta loja' }, 409);
+    updates.push('slug = ?'); params.push(slug);
+  }
   if (data.description !== undefined) { updates.push('description = ?'); params.push(data.description); }
-  if (updates.length === 0) return c.json({ error: 'Nenhum campo' }, 400);
-  updates.push("updated_at = datetime('now')");
-  params.push(id, storeId);
-  await c.env.DB.prepare(`UPDATE brands SET ${updates.join(', ')} WHERE id = ? AND store_id = ?`).bind(...params).run();
-  const brand = await c.env.DB.prepare('SELECT * FROM brands WHERE id = ? AND store_id = ?').bind(id, storeId).first();
-  if (!brand) return c.json({ error: 'Recurso não encontrado' }, 404);
+  if (!updates.length) return c.json({ error: 'Nenhum campo para atualizar' }, 400);
+  updates.push("updated_at = datetime('now')"); params.push(id, storeId);
+
+  try {
+    await c.env.DB.prepare(`UPDATE brands SET ${updates.join(', ')} WHERE id = ? AND store_id = ?`)
+      .bind(...params).run();
+  } catch (error) {
+    if (String(error).toLowerCase().includes('unique constraint failed: brands.store_id, brands.slug')) {
+      return c.json({ error: 'Endereço de marca já utilizado nesta loja' }, 409);
+    }
+    throw error;
+  }
+  const brand = await c.env.DB.prepare('SELECT * FROM brands WHERE id = ? AND store_id = ?')
+    .bind(id, storeId).first();
   return c.json({ brand, message: 'Marca atualizada!' });
 });
 
 store.delete('/brands/:id', async (c) => {
   const storeId = getStoreId(c);
   const id = c.req.param('id');
-  await c.env.DB.prepare('DELETE FROM brands WHERE id = ? AND store_id = ?').bind(id, storeId).run();
+  const result = await c.env.DB.prepare('DELETE FROM brands WHERE id = ? AND store_id = ?')
+    .bind(id, storeId).run();
+  if (result.meta?.changes !== 1) return c.json({ error: 'Marca não encontrada' }, 404);
   return c.json({ message: 'Marca removida' });
 });
 
