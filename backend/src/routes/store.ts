@@ -3,6 +3,7 @@ import { authMiddleware, requireRole } from '../middleware/auth.js';
 import { zValidator } from '../middleware/validation.js';
 import { createProductSchema, createCategorySchema, createBrandSchema, createBannerSchema, publicLinkSchema, aiGenerateSchema, updateStoreSettingsSchema } from '../utils/validation.js';
 import { slugify } from '../utils/slug.js';
+import { parsePublicSearch, escapePublicLike } from '../utils/publicSearch.js';
 import { resolveAIInputImage } from '../utils/aiImage.js';
 import { isOwnedStorageImageUrl, areOwnedStorageImages } from '../utils/imageOwnership.js';
 import { saveGeneratedImage, StorageQuotaExceededError } from '../services/aiGeneratedStorage.js';
@@ -108,12 +109,24 @@ store.get('/dashboard', async (c) => {
 // =====================
 store.get('/products', async (c) => {
   const storeId = getStoreId(c);
-  const q = c.req.query('q');
+  const search = parsePublicSearch(c.req.query('q'));
+  if (!search.valid) return c.json({ error: 'Busca inválida' }, 400);
+  const qLike = search.term ? escapePublicLike(search.term) : undefined;
   const category = c.req.query('category');
   const status = c.req.query('status');
   const featured = c.req.query('featured');
-  const page = Math.max(1, Number.parseInt(c.req.query('page') || '1') || 1);
-  const limit = Math.min(100, Math.max(1, Number.parseInt(c.req.query('limit') || '20') || 20));
+
+  const parsePositive = (raw: string | undefined, fallback: number, maximum: number) => {
+    if (raw === undefined) return fallback;
+    if (!/^[1-9][0-9]{0,4}$/.test(raw)) return null;
+    const value = Number(raw);
+    return Number.isSafeInteger(value) && value <= maximum ? value : null;
+  };
+  const page = parsePositive(c.req.query('page'), 1, 10_000);
+  const limit = parsePositive(c.req.query('limit'), 20, 100);
+  if (page === null || limit === null) {
+    return c.json({ error: 'Paginação inválida' }, 400);
+  }
   const offset = (page - 1) * limit;
 
   let query = `
@@ -127,9 +140,9 @@ store.get('/products', async (c) => {
   `;
   const params: any[] = [storeId];
 
-  if (q) {
-    query += ' AND (p.name LIKE ? OR p.sku LIKE ? OR p.description LIKE ?)';
-    params.push(`%${q}%`, `%${q}%`, `%${q}%`);
+  if (qLike) {
+    query += " AND (p.name LIKE ? ESCAPE '\\' OR p.sku LIKE ? ESCAPE '\\' OR p.description LIKE ? ESCAPE '\\')";
+    params.push(qLike, qLike, qLike);
   }
   if (category) {
     query += ' AND p.category_id = ?';
@@ -151,9 +164,9 @@ store.get('/products', async (c) => {
   // Total count
   let countQuery = 'SELECT COUNT(*) as count FROM products WHERE store_id = ?';
   const countParams: any[] = [storeId];
-  if (q) {
-    countQuery += ' AND (name LIKE ? OR sku LIKE ? OR description LIKE ?)';
-    countParams.push(`%${q}%`, `%${q}%`, `%${q}%`);
+  if (qLike) {
+    countQuery += " AND (name LIKE ? ESCAPE '\\' OR sku LIKE ? ESCAPE '\\' OR description LIKE ? ESCAPE '\\')";
+    countParams.push(qLike, qLike, qLike);
   }
   if (status && status !== 'all') {
     countQuery += ' AND status = ?';
