@@ -4,6 +4,7 @@ import { zValidator } from '../middleware/validation.js';
 import { createProductSchema, createCategorySchema, createBrandSchema, createBannerSchema, publicLinkSchema, aiGenerateSchema } from '../utils/validation.js';
 import { slugify } from '../utils/slug.js';
 import { resolveAIInputImage } from '../utils/aiImage.js';
+import { saveGeneratedImage } from '../services/aiGeneratedStorage.js';
 import { generateProductImage, generateProductDescription, AI_STYLES } from '../services/ai.js';
 
 type Env = {
@@ -622,6 +623,9 @@ store.post('/ai/generate', zValidator('json', aiGenerateSchema), async (c) => {
     return c.json({ error: resolvedImage.error }, resolvedImage.status);
   }
   const aiImageUrl = resolvedImage.url;
+  if (generate_image && !aiImageUrl.startsWith('data:image/')) {
+    return c.json({ error: 'Envie a foto ao armazenamento da loja antes de editá-la com IA' }, 400);
+  }
 
   // A reserva é atômica: duas requisições não podem ultrapassar as cotas
   // após a verificação preliminar. O serviço pago só é chamado depois dela.
@@ -644,13 +648,14 @@ store.post('/ai/generate', zValidator('json', aiGenerateSchema), async (c) => {
     return c.json({ error: 'Limite diário ou mensal de IA atingido.' }, 429);
   }
 
+  let generatedObjectKey: string | null = null;
   try {
     const config = {
       enabled: true,
       provider: 'openai',
       apiKey,
       model: 'gpt-4o',
-      imageModel: 'dall-e-3'
+      imageModel: 'gpt-image-2.5-flare'
     };
 
     let result: any = {};
@@ -664,24 +669,33 @@ store.post('/ai/generate', zValidator('json', aiGenerateSchema), async (c) => {
     if (generate_image) {
       try {
         const imgResult = await generateProductImage(config as any, aiImageUrl, style, result.name);
-        result.imageUrl = imgResult.imageUrl;
+        // Nunca devolver links temporários ou base64 ao navegador.
+        const stored = await saveGeneratedImage(
+          c.env.STORAGE, storeId, product_id || null, imgResult.imageBase64
+        );
+        generatedObjectKey = stored.key;
+        result.imageUrl = stored.url;
         result.imageModel = imgResult.model;
         result.cost = (result.cost || 0) + imgResult.cost;
       } catch (imgErr: any) {
-        console.error('Erro imagem IA:', imgErr);
+        console.error('Falha na etapa de imagem da IA');
         // Um pedido apenas de imagem não pode ser marcado como concluído sem ela.
         if (!generate_description) throw imgErr;
         result.imageError = 'A descrição foi gerada, mas a imagem não pôde ser concluída.';
       }
     }
 
-    // Se gerando imagem, salva como product_image ilustrativa (requer aprovação)
-    let generatedImageUrl = result.imageUrl || null;
-    
-    // Atualiza registro de geração
-    await c.env.DB.prepare(`
-      UPDATE ai_generations SET status = 'completed', generated_name = ?, generated_description = ?, generated_category = ?, generated_image_url = ?, cost_usd = ?, completed_at = datetime('now') WHERE id = ?
-    `).bind(result.name || null, result.description || null, result.category || null, generatedImageUrl, result.cost || 0, generationId).run();
+    // O histórico referencia o objeto privado no R2, ainda sem publicação.
+    const generatedImageUrl = result.imageUrl || null;
+    const saved = await c.env.DB.prepare(`
+      UPDATE ai_generations
+      SET status = 'completed', generated_name = ?, generated_description = ?,
+          generated_category = ?, generated_image_url = ?, cost_usd = ?,
+          completed_at = datetime('now')
+      WHERE id = ? AND store_id = ? AND status = 'processing'
+    `).bind(result.name || null, result.description || null, result.category || null,
+      generatedImageUrl, result.cost || 0, generationId, storeId).run();
+    if (saved.meta?.changes !== 1) throw new Error('Histórico da geração indisponível');
 
     return c.json({
       generation: {
@@ -701,6 +715,11 @@ store.post('/ai/generate', zValidator('json', aiGenerateSchema), async (c) => {
     });
 
   } catch (error: any) {
+    // Se falhar o histórico após salvar no R2, remover o objeto recém-criado.
+    if (generatedObjectKey) {
+      try { await c.env.STORAGE.delete(generatedObjectKey); }
+      catch { console.error('Falha ao limpar imagem IA não registrada no histórico'); }
+    }
     // Respostas de provedores podem conter informação interna: não retornar ao cliente.
     const reason = String(error?.message || 'Falha na IA').slice(0, 500);
     await c.env.DB.prepare("UPDATE ai_generations SET status = 'failed', error_message = ? WHERE id = ? AND store_id = ?")
