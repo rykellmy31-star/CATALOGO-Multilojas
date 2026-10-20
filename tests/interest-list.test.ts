@@ -35,7 +35,7 @@ describe('Lista de interesse do catálogo', () => {
     expect(msg).not.toContain('9799');
     expect(msg).toContain('preços e a disponibilidade atualizados');
   });
-  it.each([null, '', '12345', '1'.repeat(16), {}, undefined])
+  it.each([null, '', '12345', '1'.repeat(16), '+55 73 99999 8888 <script>', '00000000000', {}, undefined])
     ('recusa WhatsApp inválido: %s', phone => {
       expect(link([product('p1')], phone)).toBeNull();
     });
