@@ -27,9 +27,7 @@ publicRoutes.get('/stores/:slug', async (c) => {
 
   // Banners ativos
   const banners = await c.env.DB.prepare(`
-    SELECT id, store_id, title, subtitle, image_url, link_url, button_text,
-      position, sort_order, starts_at, ends_at
-    FROM banners
+    SELECT * FROM banners
     WHERE store_id = ? AND is_active = 1
       AND (starts_at IS NULL OR julianday(starts_at) <= julianday('now'))
       AND (ends_at IS NULL OR julianday(ends_at) > julianday('now'))
