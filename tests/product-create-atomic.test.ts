@@ -79,6 +79,59 @@ describe('Cadastro atômico multiempresa', () => {
     expect((f.db.prepare("SELECT COUNT(*) AS n FROM product_images WHERE store_id = 'a'").get() as any).n).toBe(2);
   });
 
+  it('identifica como IA a imagem gerada antes do cadastro na própria loja', async () => {
+    f = fixture();
+    const url = '/api/storage/' + encodeURIComponent('stores/a/products/general/generated.png');
+    f.db.prepare(`
+      INSERT INTO ai_generations
+        (id, store_id, user_id, type, status, generated_image_url, ai_style)
+      VALUES ('gen-a', 'a', 'ua', 'image', 'completed', ?, 'premium_catalog')
+    `).run(url);
+    const response = await create({ name: 'Produto com IA', price: 250, images: [url] });
+    expect(response.status).toBe(201);
+    const product = (await response.json() as any).product;
+    const images = f.db.prepare(
+      'SELECT url, is_ai_generated, ai_style, store_id FROM product_images WHERE product_id = ?'
+    ).all(product.id);
+    expect(images).toEqual([{
+      url, store_id: 'a', is_ai_generated: 1, ai_style: 'premium_catalog'
+    }]);
+  });
+
+  it('não marca imagem de geração pendente como IA', async () => {
+    f = fixture();
+    const url = 'https://example.com/pending.png';
+    f.db.prepare(`
+      INSERT INTO ai_generations
+        (id, store_id, user_id, type, status, generated_image_url, ai_style)
+      VALUES ('gen-pending', 'a', 'ua', 'image', 'processing', ?, 'modern_room')
+    `).run(url);
+    const response = await create({ name: 'Imagem pendente', price: 250, images: [url] });
+    expect(response.status).toBe(201);
+    const product = (await response.json() as any).product;
+    const image = f.db.prepare(
+      'SELECT is_ai_generated, ai_style FROM product_images WHERE product_id = ?'
+    ).get(product.id);
+    expect(image).toMatchObject({ is_ai_generated: 0, ai_style: null });
+  });
+
+  it('não confunde geração de outra loja com imagem IA própria', async () => {
+    f = fixture();
+    const url = 'https://example.com/other-store.png';
+    f.db.prepare(`
+      INSERT INTO ai_generations
+        (id, store_id, user_id, type, status, generated_image_url, ai_style)
+      VALUES ('gen-b', 'b', 'ub', 'image', 'completed', ?, 'white_background')
+    `).run(url);
+    const response = await create({ name: 'Imagem externa', price: 250, images: [url] });
+    expect(response.status).toBe(201);
+    const product = (await response.json() as any).product;
+    const image = f.db.prepare(
+      'SELECT is_ai_generated, ai_style, store_id FROM product_images WHERE product_id = ?'
+    ).get(product.id);
+    expect(image).toMatchObject({ store_id: 'a', is_ai_generated: 0, ai_style: null });
+  });
+
   it('permite produto sem imagem', async () => {
     f = fixture();
     const response = await create({ name: 'Sem imagem', price: 0 });
