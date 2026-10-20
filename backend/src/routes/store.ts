@@ -512,14 +512,25 @@ store.get('/categories', async (c) => {
 store.post('/categories', zValidator('json', createCategorySchema), async (c) => {
   const storeId = getStoreId(c);
   const data = c.req.valid('json');
-  if (!await validRelations(c, data, storeId)) return c.json({ error: 'Referência não pertence à loja' }, 400);
-  const slug = data.slug ? slugify(data.slug) : slugify(data.name);
-  
+  if (!await validRelations(c, data, storeId)) return c.json({ error: 'Categoria pai não pertence à loja' }, 400);
+
+  const slug = slugify(data.slug || data.name);
+  if (!slug) return c.json({ error: 'Nome ou endereço inválido para a categoria' }, 400);
+
   const id = crypto.randomUUID();
-  await c.env.DB.prepare('INSERT INTO categories (id, store_id, name, slug, description, parent_id, sort_order) VALUES (?, ?, ?, ?, ?, ?, ?)').bind(id, storeId, data.name, slug, data.description || null, data.parent_id || null, data.sort_order || 0).run();
-  
-  const category = await c.env.DB.prepare('SELECT * FROM categories WHERE id = ? AND store_id = ?').bind(id, storeId).first();
-  if (!category) return c.json({ error: 'Recurso não encontrado' }, 404);
+  // ON CONFLICT impede erro 500 e evita colisões em requisições simultâneas.
+  const inserted = await c.env.DB.prepare(`
+    INSERT INTO categories (id, store_id, name, slug, description, parent_id, sort_order, is_active)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(store_id, slug) DO NOTHING
+  `).bind(id, storeId, data.name, slug, data.description || null,
+    data.parent_id || null, data.sort_order ?? 0, data.is_active === false ? 0 : 1).run();
+  if (inserted.meta?.changes !== 1) {
+    return c.json({ error: 'Endereço de categoria já utilizado nesta loja' }, 409);
+  }
+
+  const category = await c.env.DB.prepare('SELECT * FROM categories WHERE id = ? AND store_id = ?')
+    .bind(id, storeId).first();
   return c.json({ category, message: 'Categoria criada!' }, 201);
 });
 
@@ -527,32 +538,67 @@ store.put('/categories/:id', zValidator('json', createCategorySchema.partial()),
   const storeId = getStoreId(c);
   const id = c.req.param('id');
   const data = c.req.valid('json');
-  if (!await validRelations(c, data, storeId)) return c.json({ error: 'Referência não pertence à loja' }, 400);
-  
+  const existing = await c.env.DB.prepare('SELECT id FROM categories WHERE id = ? AND store_id = ?')
+    .bind(id, storeId).first();
+  if (!existing) return c.json({ error: 'Categoria não encontrada' }, 404);
+  if (!await validRelations(c, data, storeId)) return c.json({ error: 'Categoria pai não pertence à loja' }, 400);
+
+  if (data.parent_id) {
+    // Percorre a subárvore atual, com UNION (deduplicado) para resistir
+    // inclusive a ciclos eventualmente presentes em dados legados.
+    const cycle = await c.env.DB.prepare(`
+      WITH RECURSIVE descendants(id) AS (
+        SELECT id FROM categories WHERE id = ? AND store_id = ?
+        UNION
+        SELECT child.id FROM categories AS child
+        JOIN descendants AS parent ON child.parent_id = parent.id
+        WHERE child.store_id = ?
+      )
+      SELECT id FROM descendants WHERE id = ? LIMIT 1
+    `).bind(id, storeId, storeId, data.parent_id).first();
+    if (cycle) return c.json({ error: 'Uma categoria não pode ser filha de si mesma ou de uma subcategoria' }, 400);
+  }
+
   const updates: string[] = [];
-  const params: any[] = [];
-  if (data.name) { updates.push('name = ?'); params.push(data.name); }
-  if (data.slug) { updates.push('slug = ?'); params.push(slugify(data.slug)); }
-  else if (data.name) { updates.push('slug = ?'); params.push(slugify(data.name)); }
+  const params: unknown[] = [];
+  if (data.name !== undefined) { updates.push('name = ?'); params.push(data.name); }
+  if (data.slug || data.name !== undefined) {
+    const slug = slugify(data.slug || data.name || '');
+    if (!slug) return c.json({ error: 'Nome ou endereço inválido para a categoria' }, 400);
+    const taken = await c.env.DB.prepare(
+      'SELECT id FROM categories WHERE store_id = ? AND slug = ? AND id != ?'
+    ).bind(storeId, slug, id).first();
+    if (taken) return c.json({ error: 'Endereço de categoria já utilizado nesta loja' }, 409);
+    updates.push('slug = ?'); params.push(slug);
+  }
   if (data.description !== undefined) { updates.push('description = ?'); params.push(data.description); }
   if (data.sort_order !== undefined) { updates.push('sort_order = ?'); params.push(data.sort_order); }
   if (data.parent_id !== undefined) { updates.push('parent_id = ?'); params.push(data.parent_id); }
   if (data.is_active !== undefined) { updates.push('is_active = ?'); params.push(data.is_active ? 1 : 0); }
-  
-  if (updates.length === 0) return c.json({ error: 'Nenhum campo para atualizar' }, 400);
-  updates.push("updated_at = datetime('now')");
-  params.push(id, storeId);
-  
-  await c.env.DB.prepare(`UPDATE categories SET ${updates.join(', ')} WHERE id = ? AND store_id = ?`).bind(...params).run();
-  const category = await c.env.DB.prepare('SELECT * FROM categories WHERE id = ? AND store_id = ?').bind(id, storeId).first();
-  if (!category) return c.json({ error: 'Recurso não encontrado' }, 404);
+  if (!updates.length) return c.json({ error: 'Nenhum campo para atualizar' }, 400);
+  updates.push("updated_at = datetime('now')"); params.push(id, storeId);
+
+  try {
+    await c.env.DB.prepare(`UPDATE categories SET ${updates.join(', ')} WHERE id = ? AND store_id = ?`)
+      .bind(...params).run();
+  } catch (error) {
+    // Também cobre colisões que ocorrerem entre a consulta e o UPDATE.
+    if (String(error).toLowerCase().includes('unique constraint failed: categories.store_id, categories.slug')) {
+      return c.json({ error: 'Endereço de categoria já utilizado nesta loja' }, 409);
+    }
+    throw error;
+  }
+  const category = await c.env.DB.prepare('SELECT * FROM categories WHERE id = ? AND store_id = ?')
+    .bind(id, storeId).first();
   return c.json({ category, message: 'Categoria atualizada!' });
 });
 
 store.delete('/categories/:id', async (c) => {
   const storeId = getStoreId(c);
   const id = c.req.param('id');
-  await c.env.DB.prepare('DELETE FROM categories WHERE id = ? AND store_id = ?').bind(id, storeId).run();
+  const result = await c.env.DB.prepare('DELETE FROM categories WHERE id = ? AND store_id = ?')
+    .bind(id, storeId).run();
+  if (result.meta?.changes !== 1) return c.json({ error: 'Categoria não encontrada' }, 404);
   return c.json({ message: 'Categoria removida' });
 });
 
