@@ -707,7 +707,7 @@ store.post('/ai/generate', zValidator('json', aiGenerateSchema), async (c) => {
         characteristics: result.characteristics,
         imageUrl: generatedImageUrl,
         cost: result.cost,
-        model: result.model,
+        model: result.imageModel || result.model,
         style,
         imageError: result.imageError
       },
