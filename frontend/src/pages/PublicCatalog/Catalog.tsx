@@ -1,7 +1,7 @@
-import { getDisplayPrice } from '../../lib/pricing';
+import { normalizeInterestProducts, buildInterestListUrl, type InterestProduct } from '../../lib/interestList';
 import { useEffect, useState } from 'react';
 import { useParams, useSearchParams, Link } from 'react-router-dom';
-import api, { formatPrice, getImageUrl } from '../../lib/api';
+import api from '../../lib/api';
 import { PublicLayout } from '../../components/layout/Layout';
 import { ProductCard, ProductCardSkeleton } from '../../components/catalog/ProductCard';
 import { Search, SlidersHorizontal, X, Star, Tag, Eye, Heart } from 'lucide-react';
@@ -23,9 +23,17 @@ export default function Catalog() {
   const [showFilters, setShowFilters] = useState(false);
   const [interestList, setInterestList] = useState<string[]>([]);
 
-  const [interestProducts, setInterestProducts] = useState<any[]>([]);
+  const [interestProducts, setInterestProducts] = useState<InterestProduct[]>([]);
   useEffect(() => {
-    try { const saved = JSON.parse(localStorage.getItem(`interestList:${slug}`) || '[]'); setInterestProducts(Array.isArray(saved) ? saved : []); setInterestList(Array.isArray(saved) ? saved.map(p => p.id) : []); } catch { setInterestList([]); setInterestProducts([]); }
+    let saved: InterestProduct[] = [];
+    try {
+      const raw = localStorage.getItem(`interestList:${slug}`);
+      saved = normalizeInterestProducts(JSON.parse(raw || '[]'));
+      // Remove preços e campos antigos do armazenamento.
+      if (raw) localStorage.setItem(`interestList:${slug}`, JSON.stringify(saved));
+    } catch { /* armazenamento indisponível */ }
+    setInterestProducts(saved);
+    setInterestList(saved.map(p => p.id));
     setStore(null);
   }, [slug]);
 
@@ -78,25 +86,25 @@ export default function Catalog() {
   };
 
   const toggleInterest = (productId: string) => {
-    const updated = interestList.includes(productId) ? interestList.filter(id=>id!==productId) : [...interestList, productId];
-    setInterestList(updated);
-    const selected = updated.includes(productId) ? [...interestProducts, products.find(p=>p.id===productId)].filter(Boolean) : interestProducts.filter(p=>p.id!==productId);
+    const selected = normalizeInterestProducts(
+      interestList.includes(productId)
+        ? interestProducts.filter(p => p.id !== productId)
+        : [...interestProducts, products.find(p => p.id === productId)]
+    );
     setInterestProducts(selected);
-    localStorage.setItem(`interestList:${slug}`, JSON.stringify(selected));
+    setInterestList(selected.map(p => p.id));
+    try { localStorage.setItem(`interestList:${slug}`, JSON.stringify(selected)); } catch {}
   };
 
-  const sendInterestList = () => {
-    if (!store || interestList.length === 0) return;
-    const wa = store.whatsapp?.replace(/\D/g,'');
-    if (!wa) return;
-    let msg = `Olá! Tenho interesse nos seguintes produtos da ${store.name}:\n\n`;
-    interestProducts.forEach(p=>{
-      msg += `• ${p.name} - ${formatPrice(getDisplayPrice(p))} - ${window.location.origin}/loja/${slug}/produto/${p.slug}\n`;
-    });
-    msg += `\n\nGostaria de mais informações!`;
-    // Analytics
-    api.post(`/public/stores/${slug}/analytics`, { event_type: 'interest_list', metadata: { count: interestList.length } }).catch(()=>{});
-    window.open(`https://wa.me/${wa}?text=${encodeURIComponent(msg)}`, '_blank');
+  // Href clicável mantém a ação de abrir o WhatsApp no gesto do usuário.
+  const whatsappHref = store && slug
+    ? buildInterestListUrl(store.whatsapp, store.name, slug, interestProducts, window.location.origin)
+    : null;
+  const handleInterestClick = () => {
+    if (!store || !whatsappHref || interestProducts.length === 0) return;
+    api.post(`/public/stores/${slug}/analytics`, {
+      event_type: 'interest_list', metadata: { count: interestProducts.length }
+    }).catch(() => {});
   };
 
   if (!store && !loading) {
@@ -236,15 +244,21 @@ export default function Catalog() {
         <div className="fixed bottom-4 left-4 right-4 sm:left-auto sm:right-6 sm:max-w-sm bg-slate-900 text-white rounded-2xl shadow-2xl p-4 flex items-center justify-between">
           <div>
             <p className="font-semibold text-sm">{interestList.length} produto(s) na lista</p>
-            <p className="text-xs text-slate-300">Envie todos de uma vez no WhatsApp</p>
+            <p className="text-xs text-slate-300">{whatsappHref ? 'Envie os links pelo WhatsApp' : 'Cadastre um WhatsApp válido na loja'}</p>
           </div>
           <div className="flex gap-2">
             <button onClick={()=>{setInterestList([]); setInterestProducts([]); localStorage.removeItem(`interestList:${slug}`);}} className="p-2 rounded-xl bg-white/10 hover:bg-white/20">
               <X className="w-4 h-4" />
             </button>
-            <button onClick={sendInterestList} className="px-4 py-2 rounded-xl bg-green-500 hover:bg-green-600 text-white font-semibold text-sm">
-              Enviar
-            </button>
+            {whatsappHref ? (
+              <a href={whatsappHref} target="_blank" rel="noopener noreferrer" onClick={handleInterestClick} className="px-4 py-2 rounded-xl bg-green-500 hover:bg-green-600 text-white font-semibold text-sm">
+                Enviar
+              </a>
+            ) : (
+              <button type="button" disabled className="px-4 py-2 rounded-xl bg-gray-500 text-white font-semibold text-sm cursor-not-allowed">
+                Indisponível
+              </button>
+            )}
           </div>
         </div>
       )}
