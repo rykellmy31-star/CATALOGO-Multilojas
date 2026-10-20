@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import api from '../../lib/api';
 import { Card, Button } from '../../components/ui/Button';
 import { Plus, Trash2, Edit, Award } from 'lucide-react';
@@ -8,18 +8,33 @@ export default function Brands() {
   const [brands, setBrands] = useState<any[]>([]);
   const [name, setName] = useState('');
   const [editing, setEditing] = useState<any>(null);
+  const [saving, setSaving] = useState(false);
+  const savingRef = useRef(false);
   const fetch = async () => { try { const { data } = await api.get('/store/brands'); setBrands(data.brands || []); } catch {} };
   useEffect(()=>{fetch();},[]);
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!name) return;
+    if (savingRef.current) return;
+    const trimmedName = name.trim();
+    if (trimmedName.length < 2) return toast.error('Informe ao menos 2 caracteres para a marca');
+    savingRef.current = true;
+    setSaving(true);
     try {
-      if (editing) { await api.put(`/store/brands/${editing.id}`, { name }); setEditing(null); }
-      else await api.post('/store/brands', { name });
+      if (editing) {
+        await api.put(`/store/brands/${editing.id}`, { name: trimmedName });
+        setEditing(null);
+      } else {
+        await api.post('/store/brands', { name: trimmedName });
+      }
       setName('');
-      toast.success('Sucesso!');
-      fetch();
-    } catch { toast.error('Erro'); }
+      toast.success('Marca salva com sucesso!');
+      await fetch();
+    } catch (error: any) {
+      toast.error(error?.response?.data?.error || 'Não foi possível salvar a marca');
+    } finally {
+      savingRef.current = false;
+      setSaving(false);
+    }
   };
   const handleDelete = async (id: string) => {
     if (!confirm('Excluir marca?')) return;
@@ -34,8 +49,8 @@ export default function Brands() {
       <Card className="p-6">
         <form onSubmit={handleCreate} className="flex gap-3">
           <input value={name} onChange={e=>setName(e.target.value)} placeholder="Nova marca (ex: Brastemp, Samsung...)" className="flex-1 px-4 py-2.5 rounded-xl border border-gray-200 focus:ring-2 focus:ring-sky-500 outline-none" />
-          <Button type="submit">{editing ? 'Salvar' : <><Plus className="w-4 h-4 mr-2" /> Adicionar</>}</Button>
-          {editing && <Button type="button" variant="outline" onClick={()=>{setEditing(null); setName('');}}>Cancelar</Button>}
+          <Button type="submit" disabled={saving}>{saving ? 'Salvando...' : editing ? 'Salvar' : <><Plus className="w-4 h-4 mr-2" /> Adicionar</>}</Button>
+          {editing && <Button type="button" variant="outline" disabled={saving} onClick={()=>{setEditing(null); setName('');}}>Cancelar</Button>}
         </form>
       </Card>
       <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
