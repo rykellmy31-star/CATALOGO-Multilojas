@@ -75,7 +75,7 @@ store.get('/dashboard', async (c) => {
   const topProducts = await db.prepare(`
     SELECT p.id, p.name, p.slug, p.views, p.clicks, pi.url as image
     FROM products p
-    LEFT JOIN product_images pi ON pi.product_id = p.id AND pi.is_primary = 1
+    LEFT JOIN product_images pi ON pi.product_id = p.id AND pi.store_id = p.store_id AND pi.is_primary = 1
     WHERE p.store_id = ? ORDER BY p.views DESC LIMIT 5
   `).bind(storeId).all();
 
@@ -112,11 +112,11 @@ store.get('/products', async (c) => {
 
   let query = `
     SELECT p.*, c.name as category_name, c.slug as category_slug, b.name as brand_name,
-      (SELECT url FROM product_images WHERE product_id = p.id AND is_primary=1 LIMIT 1) as primary_image,
-      (SELECT COUNT(*) FROM product_images WHERE product_id = p.id) as images_count
+      (SELECT url FROM product_images WHERE product_id = p.id AND store_id = p.store_id AND is_primary=1 ORDER BY sort_order, created_at, id LIMIT 1) as primary_image,
+      (SELECT COUNT(*) FROM product_images WHERE product_id = p.id AND store_id = p.store_id) as images_count
     FROM products p
-    LEFT JOIN categories c ON p.category_id = c.id
-    LEFT JOIN brands b ON p.brand_id = b.id
+    LEFT JOIN categories c ON p.category_id = c.id AND c.store_id = p.store_id
+    LEFT JOIN brands b ON p.brand_id = b.id AND b.store_id = p.store_id
     WHERE p.store_id = ?
   `;
   const params: any[] = [storeId];
@@ -980,7 +980,7 @@ store.get('/analytics', async (c) => {
   const topProductsAnalytics = await c.env.DB.prepare(`
     SELECT p.name, p.slug, COUNT(*) as views 
     FROM analytics_events ae 
-    JOIN products p ON ae.product_id = p.id 
+    JOIN products p ON ae.product_id = p.id AND p.store_id = ae.store_id 
     WHERE ae.store_id = ? AND ae.event_type = 'product_view' 
     GROUP BY ae.product_id ORDER BY views DESC LIMIT 10
   `).bind(storeId).all();
