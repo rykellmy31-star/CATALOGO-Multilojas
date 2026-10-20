@@ -67,6 +67,35 @@ export const createProductSchema = z.object({
   images: z.array(publicLinkSchema).max(50).optional()
 });
 
+// O painel envia o registro inteiro recebido do GET, inclusive campos
+// opcionais como NULL. Campos internos (id, plano, cotas) são descartados.
+const nullableStoreText = (maxLength: number) => z.string().max(maxLength).nullable().optional();
+
+export const updateStoreSettingsSchema = z.object({
+  name: z.string().trim().min(2).max(200).optional(),
+  slug: z.string().max(200).nullable().optional(),
+  description: nullableStoreText(10000),
+  logo_url: publicLinkSchema.nullable().optional(),
+  banner_url: publicLinkSchema.nullable().optional(),
+  primary_color: nullableStoreText(50),
+  secondary_color: nullableStoreText(50),
+  accent_color: nullableStoreText(50),
+  address: nullableStoreText(1000),
+  city: nullableStoreText(200),
+  state: nullableStoreText(100),
+  zip_code: nullableStoreText(30),
+  phone: nullableStoreText(50),
+  whatsapp: nullableStoreText(50),
+  email: z.string().email().max(254).nullable().optional().or(z.literal('')),
+  instagram: nullableStoreText(300),
+  facebook: nullableStoreText(500),
+  website: publicLinkSchema.nullable().optional(),
+  opening_hours: nullableStoreText(2000),
+  seo_title: nullableStoreText(300),
+  seo_description: nullableStoreText(2000),
+  seo_keywords: nullableStoreText(2000)
+});
+
 export const createCategorySchema = z.object({
   name: z.string().min(2),
   slug: z.string().optional(),
