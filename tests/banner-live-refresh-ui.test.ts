@@ -26,8 +26,8 @@ describe('Catálogo: atualização leve de campanhas', () => {
   });
 
   it('faz refresh ao retornar para a aba ou janela', () => {
-    expect(source).toContain("document.addEventListener('visibilitychange', refreshBanners)");
-    expect(source).toContain("window.addEventListener('focus', refreshBanners)");
+    expect(source).toContain("document.addEventListener('visibilitychange', refreshOnFocus)");
+    expect(source).toContain("window.addEventListener('focus', refreshOnFocus)");
     expect(source).toContain("document.visibilityState !== 'visible'");
   });
 
@@ -39,8 +39,8 @@ describe('Catálogo: atualização leve de campanhas', () => {
 
   it('limpa listeners e intervalo ao sair ou mudar de loja', () => {
     expect(source).toContain('window.clearTimeout(transitionTimer)');
-    expect(source).toContain("window.removeEventListener('focus', refreshBanners)");
-    expect(source).toContain("document.removeEventListener('visibilitychange', refreshBanners)");
+    expect(source).toContain("window.removeEventListener('focus', refreshOnFocus)");
+    expect(source).toContain("document.removeEventListener('visibilitychange', refreshOnFocus)");
     expect(source).toContain('}, [slug, nextBannerTransitionAt])');
   });
 
