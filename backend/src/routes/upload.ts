@@ -1,5 +1,6 @@
 import { Hono } from 'hono';
 import { authMiddleware } from '../middleware/auth.js';
+import { reserveStorageBytes, releaseStorageBytes } from '../utils/storageQuota.js';
 
 type Env = {
   Bindings: {
@@ -74,19 +75,26 @@ upload.post('/', async (c) => {
     return c.json({ error: 'Arquivo muito grande. Máximo: 10MB.' }, 400);
   }
 
-  const storeId = user.storeId;
-  if (!storeId && user.role !== 'super_admin') {
+  const storeId = user.storeId as string | null;
+  // Super Admin sem produto precisa indicar explicitamente a loja alvo.
+  const requestedStore = formData.get('storeId');
+  if (user.role !== 'super_admin' && !storeId) {
     return c.json({ error: 'Loja não identificada' }, 400);
   }
-
-  let effectiveStoreId = storeId || 'platform';
+  let effectiveStoreId = storeId;
   if (productId) {
     const product = user.role === 'super_admin'
       ? await c.env.DB.prepare('SELECT store_id FROM products WHERE id = ?').bind(productId).first() as any
       : await c.env.DB.prepare('SELECT store_id FROM products WHERE id = ? AND store_id = ?').bind(productId, storeId).first() as any;
     if (!product) return c.json({ error: 'Produto não encontrado' }, 404);
     effectiveStoreId = product.store_id;
+  } else if (user.role === 'super_admin') {
+    if (typeof requestedStore !== 'string' || !/^[a-z0-9_-]{1,128}$/i.test(requestedStore)) {
+      return c.json({ error: 'Selecione a loja para enviar imagens' }, 400);
+    }
+    effectiveStoreId = requestedStore;
   }
+  if (!effectiveStoreId) return c.json({ error: 'Loja não identificada' }, 400);
 
   const arrayBuffer = await file.arrayBuffer();
   const bytes = new Uint8Array(arrayBuffer);
@@ -107,25 +115,30 @@ upload.post('/', async (c) => {
   // UUID criptográfico reduz colisões de uploads simultâneos.
   const key = `stores/${effectiveStoreId}/products/${productId || 'general'}/${crypto.randomUUID()}.${ext}`;
 
+  const quota = await reserveStorageBytes(c.env.DB, effectiveStoreId, file.size);
+  if (quota === 'store_unavailable') {
+    return c.json({ error: 'Loja não encontrada ou indisponível' }, 404);
+  }
+  if (quota === 'quota_exceeded') {
+    return c.json({ error: 'Limite de armazenamento da loja atingido' }, 413);
+  }
+
+  // A reserva cobre uploads ainda em trânsito e impede ultrapassar a
+  // capacidade em concorrência. Em falhas, compensa a reserva.
+  let uploaded = false;
   try {
-    await c.env.STORAGE.put(key, arrayBuffer, {
+    const stored = await c.env.STORAGE.put(key, arrayBuffer, {
       httpMetadata: {
-        contentType: file.type === 'image/jpg' ? 'image/jpeg' : file.type,
+        contentType: mime,
         cacheControl: 'no-store'
       }
     });
-  } catch (e: any) {
-    console.error('Upload indisponível');
-    return c.json({ error: 'Armazenamento indisponível. Tente novamente.' }, 503);
-  }
+    if (!stored) throw new Error('R2 não confirmou o arquivo');
+    uploaded = true;
 
-  // URLs diretas do R2 contornariam o status de publicação do produto.
-  const url = `/api/storage/${encodeURIComponent(key)}`;
-
-  // Registra a imagem em uma instrução que recalcula ordem, vínculo e primária
-  // no momento da gravação. Falhas no D1 removem o objeto recém-criado do R2.
-  if (productId) {
-    try {
+    // URLs diretas do R2 contornariam o status de publicação do produto.
+    const url = `/api/storage/${encodeURIComponent(key)}`;
+    if (productId) {
       const inserted = await c.env.DB.prepare(`
         INSERT INTO product_images (id, product_id, store_id, url, is_primary, sort_order, file_size_kb)
         SELECT ?, p.id, p.store_id, ?,
@@ -142,19 +155,30 @@ upload.post('/', async (c) => {
       `).bind(crypto.randomUUID(), url, Math.round(file.size / 1024),
         productId, effectiveStoreId).run();
       if (inserted.success === false || inserted.meta?.changes !== 1) {
-        throw new Error('Imagem não registrada');
+        throw new Error('Imagem não registrada no produto');
       }
-    } catch {
+    }
+    return c.json({ url, key, message: 'Upload realizado com sucesso!' });
+  } catch {
+    let canRelease = !uploaded;
+    if (uploaded) {
       try {
         await c.env.STORAGE.delete(key);
+        canRelease = true;
       } catch {
-        console.error('Falha ao limpar arquivo de upload não registrado');
+        // Se a exclusão falhou, a cota permanece reservada para o objeto
+        // que pode ainda estar ocupando espaço físico no R2.
+        console.error('Falha ao limpar arquivo R2 após upload');
       }
-      return c.json({ error: 'Não foi possível registrar a imagem. Tente novamente.' }, 503);
     }
+    if (canRelease) {
+      try { await releaseStorageBytes(c.env.DB, effectiveStoreId, file.size); }
+      catch { console.error('Falha ao devolver reserva de armazenamento'); }
+    }
+    return c.json({ error: 'Não foi possível concluir o envio. Tente novamente.' }, 503);
   }
 
-  return c.json({ url, key, message: 'Upload realizado com sucesso!' });
+
 });
 
 // GET /api/storage/:key - servir arquivos do R2
