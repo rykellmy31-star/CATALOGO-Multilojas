@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import { authMiddleware, requireRole } from '../middleware/auth.js';
 import { zValidator } from '../middleware/validation.js';
-import { createProductSchema, createCategorySchema, createBrandSchema, createBannerSchema, publicLinkSchema } from '../utils/validation.js';
+import { createProductSchema, createCategorySchema, createBrandSchema, createBannerSchema, publicLinkSchema, aiGenerateSchema } from '../utils/validation.js';
 import { slugify } from '../utils/slug.js';
 import { generateProductImage, generateProductDescription, AI_STYLES } from '../services/ai.js';
 
@@ -573,13 +573,10 @@ store.put('/settings', async (c) => {
 // =====================
 // AI GENERATION
 // =====================
-store.post('/ai/generate', async (c) => {
+store.post('/ai/generate', zValidator('json', aiGenerateSchema), async (c) => {
   const storeId = getStoreId(c);
   const user = c.get('user');
-  const body = await c.req.json() as any;
-  const { image_url, style = 'modern_room', product_id, generate_description = true, generate_image = true } = body;
-
-  if (!image_url) return c.json({ error: 'Imagem obrigatória' }, 400);
+  const { image_url, style, product_id, generate_description, generate_image } = c.req.valid('json');
 
   if (c.env.AI_ENABLED !== 'true') return c.json({ error: 'IA indisponível' }, 503);
   if (product_id && !await c.env.DB.prepare('SELECT id FROM products WHERE id = ? AND store_id = ?').bind(product_id, storeId).first()) return c.json({ error: 'Produto não encontrado' }, 404);
@@ -588,10 +585,23 @@ store.post('/ai/generate', async (c) => {
   const storeData = await c.env.DB.prepare('SELECT ai_enabled, ai_daily_limit, ai_monthly_limit FROM stores WHERE id = ?').bind(storeId).first() as any;
   if (!storeData?.ai_enabled) return c.json({ error: 'IA desabilitada para esta loja. Contate o Super Admin.' }, 403);
 
-  const todayStart = new Date().toISOString().split('T')[0];
-  const todayCount = await c.env.DB.prepare("SELECT COUNT(*) as count FROM ai_generations WHERE store_id = ? AND date(created_at) = date('now')").bind(storeId).first() as any;
-  if ((todayCount?.count || 0) >= (storeData.ai_daily_limit || 10)) {
-    return c.json({ error: `Limite diário de ${storeData.ai_daily_limit} gerações atingido.` }, 429);
+  // Zero significa nenhuma geração autorizada, não o limite padrão.
+  const dailyLimit = Math.max(0, Number(storeData.ai_daily_limit ?? 10));
+  const monthlyLimit = Math.max(0, Number(storeData.ai_monthly_limit ?? 100));
+  if (dailyLimit === 0 || monthlyLimit === 0) {
+    return c.json({ error: 'A IA não está disponível para este plano.' }, 429);
+  }
+  const todayCount = await c.env.DB.prepare(
+    "SELECT COUNT(*) AS count FROM ai_generations WHERE store_id = ? AND date(created_at) = date('now')"
+  ).bind(storeId).first() as any;
+  if (Number(todayCount?.count ?? 0) >= dailyLimit) {
+    return c.json({ error: 'Limite diário de IA atingido.' }, 429);
+  }
+  const monthCount = await c.env.DB.prepare(
+    "SELECT COUNT(*) AS count FROM ai_generations WHERE store_id = ? AND strftime('%Y-%m', created_at) = strftime('%Y-%m', 'now')"
+  ).bind(storeId).first() as any;
+  if (Number(monthCount?.count ?? 0) >= monthlyLimit) {
+    return c.json({ error: 'Limite mensal de IA atingido.' }, 429);
   }
 
   // Verifica se IA está configurada
@@ -604,10 +614,26 @@ store.post('/ai/generate', async (c) => {
     }, 503);
   }
 
+  // A reserva é atômica: duas requisições não podem ultrapassar as cotas
+  // após a verificação preliminar. O serviço pago só é chamado depois dela.
   const generationId = crypto.randomUUID();
-  await c.env.DB.prepare(
-    'INSERT INTO ai_generations (id, store_id, user_id, product_id, type, status, input_image_url, input_prompt, ai_model, ai_style) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
-  ).bind(generationId, storeId, user.userId, product_id || null, 'full_ad', 'processing', image_url, `style:${style}`, c.env.AI_PROVIDER || 'openai/gpt-4o', style).run();
+  const reservation = await c.env.DB.prepare(`
+    INSERT INTO ai_generations
+      (id, store_id, user_id, product_id, type, status, input_image_url, input_prompt, ai_model, ai_style)
+    SELECT ?, s.id, ?, ?, 'full_ad', 'processing', ?, ?, ?, ?
+    FROM stores AS s
+    WHERE s.id = ? AND s.ai_enabled = 1
+      AND (SELECT COUNT(*) FROM ai_generations AS g
+           WHERE g.store_id = s.id AND date(g.created_at) = date('now'))
+          < COALESCE(s.ai_daily_limit, 10)
+      AND (SELECT COUNT(*) FROM ai_generations AS g
+           WHERE g.store_id = s.id AND strftime('%Y-%m', g.created_at) = strftime('%Y-%m', 'now'))
+          < COALESCE(s.ai_monthly_limit, 100)
+  `).bind(generationId, user.userId, product_id || null, image_url,
+    `style:${style}`, c.env.AI_PROVIDER || 'openai/gpt-4o', style, storeId).run();
+  if (reservation.meta?.changes !== 1) {
+    return c.json({ error: 'Limite diário ou mensal de IA atingido.' }, 429);
+  }
 
   try {
     const config = {
@@ -634,8 +660,9 @@ store.post('/ai/generate', async (c) => {
         result.cost = (result.cost || 0) + imgResult.cost;
       } catch (imgErr: any) {
         console.error('Erro imagem IA:', imgErr);
-        // Continua mesmo se imagem falhar
-        result.imageError = imgErr.message;
+        // Um pedido apenas de imagem não pode ser marcado como concluído sem ela.
+        if (!generate_description) throw imgErr;
+        result.imageError = 'A descrição foi gerada, mas a imagem não pôde ser concluída.';
       }
     }
 
@@ -665,8 +692,11 @@ store.post('/ai/generate', async (c) => {
     });
 
   } catch (error: any) {
-    await c.env.DB.prepare("UPDATE ai_generations SET status = 'failed', error_message = ? WHERE id = ?").bind(error.message, generationId).run();
-    return c.json({ error: 'Erro ao gerar com IA', details: error.message }, 500);
+    // Respostas de provedores podem conter informação interna: não retornar ao cliente.
+    const reason = String(error?.message || 'Falha na IA').slice(0, 500);
+    await c.env.DB.prepare("UPDATE ai_generations SET status = 'failed', error_message = ? WHERE id = ? AND store_id = ?")
+      .bind(reason, generationId, storeId).run().catch(() => {});
+    return c.json({ error: 'Não foi possível concluir a geração com IA' }, 500);
   }
 });
 
