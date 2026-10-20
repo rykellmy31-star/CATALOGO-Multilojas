@@ -194,3 +194,53 @@ test('logout de outra aba durante login local invalida resposta antiga', async (
   await expect(pending).rejects.toThrow('substituída');
   expect(f.storage.get('token')).toBe('B');
 });
+
+
+test('usuário em cache não aparece antes da validação de /auth/me', () => {
+  const f = mount({ token: 'A', user: JSON.stringify(user('antigo')) });
+  expect(f.auth.user).toBeNull();
+  expect(f.auth.loading).toBe(true);
+  expect(f.auth.token).toBe('A');
+  expect(f.calls[0].url).toBe('/auth/me');
+});
+
+test('usuário válido aparece apenas após validação inicial', async () => {
+  const f = mount({ token: 'A', user: JSON.stringify(user('antigo')) });
+  f.calls[0].resolve({ data: { user: user('novo') } });
+  await flush();
+  expect(f.auth.user.id).toBe('novo');
+  expect(f.auth.loading).toBe(false);
+  expect(JSON.parse(f.storage.get('user')!).id).toBe('novo');
+});
+
+test('falha de autenticação inicial apaga cache e sessão', async () => {
+  const f = mount({ token: 'A', user: JSON.stringify(user('antigo')) });
+  f.calls[0].reject(new Error('401'));
+  await flush();
+  expect(f.auth.user).toBeNull();
+  expect(f.auth.token).toBeNull();
+  expect(f.auth.loading).toBe(false);
+  expect(f.storage.has('token')).toBe(false);
+  expect(f.storage.has('user')).toBe(false);
+});
+
+test('novo evento com token revogado anteriormente exige revalidação', async () => {
+  const f = mount({ token: 'A' });
+  f.calls[0].reject(new Error('401'));
+  await flush();
+  f.externalToken('A');
+  expect(f.calls.length).toBe(2);
+  expect(f.auth.user).toBeNull();
+  expect(f.auth.loading).toBe(true);
+  f.calls[1].resolve({ data: { user: user('novo') } });
+  await flush();
+  expect(f.auth.user.id).toBe('novo');
+});
+
+test('ausência de token mantém painel bloqueado e limpa cache', () => {
+  const f = mount({ user: JSON.stringify(user('antigo')) });
+  expect(f.auth.user).toBeNull();
+  expect(f.auth.loading).toBe(false);
+  expect(f.storage.has('user')).toBe(false);
+  expect(f.calls.length).toBe(0);
+});
