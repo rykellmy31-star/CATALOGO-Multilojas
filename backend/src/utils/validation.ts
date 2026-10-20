@@ -2,9 +2,13 @@ import { z } from 'zod';
 
 export const publicLinkSchema = z.string().max(4096).refine(value => {
   if (!value) return true;
-  if (value.includes('\\') || /[\u0000-\u0020]/.test(value)) return false;
+  if (value.includes('\\') || /[\u0000-\u0020\u007f]/.test(value)) return false;
   if (value.startsWith('/') && !value.startsWith('//')) return true;
-  try { return ['https:', 'http:'].includes(new URL(value).protocol); } catch { return false; }
+  try {
+    const url = new URL(value);
+    return ['https:', 'http:'].includes(url.protocol) &&
+      !url.username && !url.password && Boolean(url.hostname);
+  } catch { return false; }
 }, 'Use uma URL http/https ou caminho local seguro');
 
 export const loginSchema = z.object({
