@@ -641,10 +641,20 @@ store.put('/settings', async (c) => {
 store.post('/ai/generate', zValidator('json', aiGenerateSchema), async (c) => {
   const storeId = getStoreId(c);
   const user = c.get('user');
-  const { image_url, style, product_id, generate_description, generate_image } = c.req.valid('json');
+  const { image_url, style, product_id, generate_description, generate_image, request_id } = c.req.valid('json');
 
   if (c.env.AI_ENABLED !== 'true') return c.json({ error: 'IA indisponível' }, 503);
   if (product_id && !await c.env.DB.prepare('SELECT id FROM products WHERE id = ? AND store_id = ?').bind(product_id, storeId).first()) return c.json({ error: 'Produto não encontrado' }, 404);
+
+  // Requisições reencaminhadas mantêm o mesmo UUID e nunca acionam a IA outra vez.
+  if (request_id) {
+    const previous = await c.env.DB.prepare(
+      'SELECT status FROM ai_generations WHERE id = ? AND store_id = ? AND user_id = ?'
+    ).bind(request_id, storeId, user.userId).first();
+    if (previous) return c.json({
+      error: 'Solicitação já registrada. Consulte o histórico antes de tentar novamente.'
+    }, 409);
+  }
 
   // Verifica limites
   const storeData = await c.env.DB.prepare('SELECT ai_enabled, ai_daily_limit, ai_monthly_limit FROM stores WHERE id = ?').bind(storeId).first() as any;
@@ -692,7 +702,7 @@ store.post('/ai/generate', zValidator('json', aiGenerateSchema), async (c) => {
 
   // A reserva é atômica: duas requisições não podem ultrapassar as cotas
   // após a verificação preliminar. O serviço pago só é chamado depois dela.
-  const generationId = crypto.randomUUID();
+  const generationId = request_id || crypto.randomUUID();
   const reservation = await c.env.DB.prepare(`
     INSERT INTO ai_generations
       (id, store_id, user_id, product_id, type, status, input_image_url, input_prompt, ai_model, ai_style)
@@ -705,9 +715,18 @@ store.post('/ai/generate', zValidator('json', aiGenerateSchema), async (c) => {
       AND (SELECT COUNT(*) FROM ai_generations AS g
            WHERE g.store_id = s.id AND strftime('%Y-%m', g.created_at) = strftime('%Y-%m', 'now'))
           < COALESCE(s.ai_monthly_limit, 100)
+    ON CONFLICT(id) DO NOTHING
   `).bind(generationId, user.userId, product_id || null, image_url,
     `style:${style}`, c.env.AI_PROVIDER || 'openai/gpt-4o', style, storeId).run();
   if (reservation.meta?.changes !== 1) {
+    if (request_id) {
+      const existing = await c.env.DB.prepare(
+        'SELECT id FROM ai_generations WHERE id = ? AND store_id = ? AND user_id = ?'
+      ).bind(request_id, storeId, user.userId).first();
+      if (existing) return c.json({
+        error: 'Solicitação já registrada. Consulte o histórico antes de tentar novamente.'
+      }, 409);
+    }
     return c.json({ error: 'Limite diário ou mensal de IA atingido.' }, 429);
   }
 
