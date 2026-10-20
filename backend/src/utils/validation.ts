@@ -150,3 +150,20 @@ export const storeAdminSchema = z.object({
   email: z.string().trim().email().max(254),
   password: z.string().min(8).max(72)
 });
+
+
+/** Campos editáveis da configuração global; propriedades internas são descartadas. */
+export const updatePlatformConfigSchema = z.object({
+  platform_name: z.string().trim().min(2).max(200).optional(),
+  logo_url: publicLinkSchema.nullable().optional(),
+  primary_color: z.string().regex(/^#[0-9a-fA-F]{6}$/, 'Cor hexadecimal inválida').optional(),
+  secondary_color: z.string().regex(/^#[0-9a-fA-F]{6}$/, 'Cor hexadecimal inválida').optional(),
+  accent_color: z.string().regex(/^#[0-9a-fA-F]{6}$/, 'Cor hexadecimal inválida').optional(),
+  footer_text: z.string().max(2000).nullable().optional(),
+  support_email: z.union([z.string().email().max(254), z.literal(''), z.null()]).optional(),
+  ai_provider: z.enum(['openai', 'anthropic', 'google']).optional(),
+  ai_enabled: z.union([z.boolean(), z.literal(0), z.literal(1)]).optional(),
+  ai_daily_limit_default: z.number().int().min(0).max(10000).optional(),
+  ai_monthly_limit_default: z.number().int().min(0).max(100000).optional(),
+  storage_limit_per_store_mb: z.number().int().min(1).max(102400).optional()
+});
