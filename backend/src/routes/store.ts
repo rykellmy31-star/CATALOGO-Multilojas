@@ -826,10 +826,14 @@ store.post('/ai/approve-image', async (c) => {
   // Uma única instrução impede aprovar imagens alheias, forjadas ou já aprovadas.
   const imageId = crypto.randomUUID();
   const result = await c.env.DB.prepare(`
-    INSERT INTO product_images (id, product_id, store_id, url, is_ai_generated, ai_style, sort_order)
+    INSERT INTO product_images (id, product_id, store_id, url, is_ai_generated, ai_style, is_primary, sort_order)
     SELECT ?, ?, ?, g.generated_image_url, 1,
       CASE WHEN g.ai_style IN ('modern_room', 'white_background', 'promotional', 'premium_catalog')
         THEN g.ai_style ELSE 'modern_room' END,
+      CASE WHEN NOT EXISTS (
+        SELECT 1 FROM product_images AS current
+        WHERE current.product_id = ? AND current.store_id = ?
+      ) THEN 1 ELSE 0 END,
       COALESCE((SELECT MAX(pi.sort_order) + 1 FROM product_images AS pi
         WHERE pi.product_id = ? AND pi.store_id = ?), 0)
     FROM ai_generations AS g
@@ -839,10 +843,10 @@ store.post('/ai/approve-image', async (c) => {
       AND NOT EXISTS (
         SELECT 1 FROM product_images AS previous
         WHERE previous.product_id = ? AND previous.store_id = ?
-          AND previous.url = g.generated_image_url AND previous.is_ai_generated = 1
+          AND previous.url = g.generated_image_url
       )
-  `).bind(imageId, product_id, storeId, product_id, storeId, generation_id,
-    storeId, image_url, product_id, product_id, storeId).run();
+  `).bind(imageId, product_id, storeId, product_id, storeId,
+    product_id, storeId, generation_id, storeId, image_url, product_id, product_id, storeId).run();
   if (result.meta?.changes !== 1) {
     return c.json({ error: 'Geração não encontrada, inválida ou já aprovada' }, 409);
   }
