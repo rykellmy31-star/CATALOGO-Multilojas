@@ -127,7 +127,10 @@ export const createBannerSchema = z.object({
   button_text: z.string().optional(),
   position: z.enum(['hero', 'secondary', 'footer', 'popup']).default('hero'),
   is_active: z.boolean().optional().default(true),
-  sort_order: z.coerce.number().optional()
+  sort_order: z.coerce.number().int().min(0).max(10000).optional(),
+  // Frontend envia ISO 8601 com fuso. NULL limpa a programação.
+  starts_at: z.string().datetime({ offset: true }).nullable().optional(),
+  ends_at: z.string().datetime({ offset: true }).nullable().optional()
 });
 
 export const aiGenerateSchema = z.object({
