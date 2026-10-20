@@ -16,6 +16,12 @@ type AuditResult = {
   review_candidates: { key: string; size_bytes: number; uploaded_at: string }[];
   pagination: { has_more: boolean; next_cursor: string | null };
   complete_store_scan: boolean;
+  reconciliation: {
+    is_complete_snapshot: boolean;
+    actual_r2_mb: number | null;
+    difference_mb: number | null;
+    automatic_adjustment: boolean;
+  };
 };
 
 export default function StoreDetail() {
@@ -256,6 +262,13 @@ export default function StoreDetail() {
                 <p className="font-semibold">{audit.result.scanned.older_than_7_days_for_review}</p>
               </div>
             </div>
+            {audit.result.reconciliation.is_complete_snapshot && (
+              <p className="text-sm text-gray-600">
+                Armazenamento encontrado no R2: {(audit.result.reconciliation.actual_r2_mb ?? 0).toFixed(2)} MB.
+                Diferença estimada em relação ao contador: {(audit.result.reconciliation.difference_mb ?? 0).toFixed(4)} MB.
+                Nenhum ajuste foi aplicado.
+              </p>
+            )}
             <p className="text-sm text-gray-600">
               {audit.result.scanned.referenced} arquivos referenciados e {audit.result.scanned.unreferenced} sem referência conhecida nesta página.
               {audit.result.scanned.unknown_upload_date > 0 && ` ${audit.result.scanned.unknown_upload_date} sem data verificável.`}
