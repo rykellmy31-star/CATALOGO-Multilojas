@@ -110,6 +110,66 @@ describe('Edição transacional de produtos e imagens', () => {
     expect((f!.db.prepare("SELECT name FROM products WHERE id = 'pa'").get() as any).name).toBe('Produto A');
   });
 
+  it('reconhece imagem IA adicionada durante edição sem o cliente enviar flags', async () => {
+    seed();
+    const generated = '/api/storage/' +
+      encodeURIComponent('stores/a/products/general/generated.png');
+    f!.db.prepare(`
+      INSERT INTO ai_generations
+        (id, store_id, user_id, type, status, generated_image_url, ai_style)
+      VALUES ('generation-own', 'a', 'ua', 'image', 'completed', ?, 'premium_catalog')
+    `).run(generated);
+    const response = await update({ images: [ai, generated] });
+    expect(response.status).toBe(200);
+    const result = f!.db.prepare(
+      'SELECT is_ai_generated, ai_style, is_primary, sort_order FROM product_images WHERE product_id = ? AND url = ?'
+    ).get('pa', generated);
+    expect(result).toMatchObject({
+      is_ai_generated: 1, ai_style: 'premium_catalog',
+      is_primary: 0, sort_order: 1
+    });
+  });
+
+  it('não classifica imagem de geração de outra loja como IA própria', async () => {
+    seed();
+    const url = 'https://example.com/catalogo-antigo.png';
+    f!.db.prepare(`
+      INSERT INTO ai_generations
+        (id, store_id, user_id, type, status, generated_image_url, ai_style)
+      VALUES ('generation-other', 'b', 'ub', 'image', 'completed', ?, 'promotional')
+    `).run(url);
+    const response = await update({ images: [url] });
+    expect(response.status).toBe(200);
+    const result = f!.db.prepare(
+      'SELECT is_ai_generated, ai_style FROM product_images WHERE product_id = ? AND url = ?'
+    ).get('pa', url);
+    expect(result).toMatchObject({ is_ai_generated: 0, ai_style: null });
+  });
+
+  it('não classifica uma geração pendente como foto IA aprovada na edição', async () => {
+    seed();
+    const url = 'https://example.com/geracao-pendente.png';
+    f!.db.prepare(`
+      INSERT INTO ai_generations
+        (id, store_id, user_id, type, status, generated_image_url, ai_style)
+      VALUES ('generation-pending', 'a', 'ua', 'image', 'processing', ?, 'modern_room')
+    `).run(url);
+    const response = await update({ images: [url] });
+    expect(response.status).toBe(200);
+    const result = f!.db.prepare(
+      'SELECT is_ai_generated, ai_style FROM product_images WHERE product_id = ? AND url = ?'
+    ).get('pa', url);
+    expect(result).toMatchObject({ is_ai_generated: 0, ai_style: null });
+  });
+
+  it('repetir URL na edição não gera duas linhas da mesma foto', async () => {
+    seed();
+    const response = await update({ images: [normal, normal, ai, ai] });
+    expect(response.status).toBe(200);
+    expect(ownImages().map(image => image.url)).toEqual([normal, ai]);
+    expect(ownImages().map(image => image.is_primary)).toEqual([1, 0]);
+  });
+
   it('reordena imagens existentes sem perder os IDs', async () => {
     seed();
     expect((await update({ images: [normal, ai] })).status).toBe(200);
