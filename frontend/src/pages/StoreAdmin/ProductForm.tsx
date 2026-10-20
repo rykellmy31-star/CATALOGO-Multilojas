@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { parseProductAmount } from '../../lib/productFormSafety';
 import { useNavigate, useParams, Link } from 'react-router-dom';
 import api from '../../lib/api';
 import AdminImage from '../../components/AdminImage';
@@ -22,6 +23,23 @@ export default function ProductForm() {
   const [previewOpen, setPreviewOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [uploading, setUploading] = useState(false);
+  // Refs impedem operações duplicadas mesmo antes da atualização visual do React.
+  const savingRef = useRef(false);
+  const galleryUploadingRef = useRef(false);
+  const galleryControllerRef = useRef<AbortController | null>(null);
+  const aiGeneratingRef = useRef(false);
+  const applyingAIRef = useRef(false);
+  const aiUploadRef = useRef<{ sequence: number; pending: boolean; controller: AbortController | null }>({
+    sequence: 0, pending: false, controller: null
+  });
+  const [aiUploading, setAiUploading] = useState(false);
+
+  useEffect(() => () => {
+    galleryControllerRef.current?.abort();
+    aiUploadRef.current.sequence++;
+    aiUploadRef.current.controller?.abort();
+    aiUploadRef.current.pending = false;
+  }, []);
   
   // IA state
   const [showAI, setShowAI] = useState(false);
@@ -51,31 +69,70 @@ export default function ProductForm() {
   }, [id]);
 
   const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files;
-    if (!files || files.length === 0) return;
+    const input = e.currentTarget;
+    const selected = Array.from(input.files || []);
+    input.value = '';
+    if (!selected.length) return;
+    if (savingRef.current || galleryUploadingRef.current) {
+      return toast.error('Aguarde a operação anterior terminar');
+    }
+    for (const file of selected) {
+      if (!['image/jpeg','image/jpg','image/png','image/webp','image/gif'].includes(file.type) ||
+          file.size > 10 * 1024 * 1024) {
+        return toast.error('Use imagens JPG, PNG, WEBP ou GIF de até 10 MB');
+      }
+    }
+    const controller = new AbortController();
+    galleryUploadingRef.current = true;
+    galleryControllerRef.current = controller;
     setUploading(true);
     try {
-      for (const file of Array.from(files)) {
+      for (const file of selected) {
         const fd = new FormData();
         fd.append('file', file);
-        const { data } = await api.post('/upload', fd, { headers: { 'Content-Type': 'multipart/form-data' } });
-        setImages(prev => [...prev, data.url]);
-        if (!aiImage) setAiImage(data.url);
+        const { data } = await api.post('/upload', fd, {
+          headers: { 'Content-Type': 'multipart/form-data' }, signal: controller.signal
+        });
+        if (controller.signal.aborted) return;
+        if (typeof data?.url !== 'string' || !data.url.trim()) throw new Error('Imagem sem URL');
+        setImages(prev => prev.includes(data.url) ? prev : [...prev, data.url]);
+        setAiImage(prev => prev || data.url);
       }
       toast.success('Imagens enviadas!');
-    } catch { toast.error('Erro ao enviar imagem'); } finally { setUploading(false); }
+    } catch {
+      if (!controller.signal.aborted) toast.error('Erro ao enviar imagem');
+    } finally {
+      if (galleryControllerRef.current === controller) {
+        galleryUploadingRef.current = false;
+        galleryControllerRef.current = null;
+        setUploading(false);
+      }
+    }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (savingRef.current) return;
+    if (galleryUploadingRef.current || aiUploadRef.current.pending || aiGeneratingRef.current || applyingAIRef.current) {
+      return toast.error('Aguarde os uploads e a IA terminarem antes de salvar');
+    }
     if (!form.name || form.price === '' || form.price == null) return toast.error('Nome e preço são obrigatórios');
+    let price: number, originalPrice: number | null, promotionalPrice: number | null;
+    try {
+      price = parseProductAmount(form.price) as number;
+      originalPrice = parseProductAmount(form.original_price, true);
+      promotionalPrice = parseProductAmount(form.promotional_price, true);
+    } catch {
+      return toast.error('Confira os preços: informe valores válidos e não negativos');
+    }
+    savingRef.current = true;
     setLoading(true);
     try {
       const payload = {
         ...form,
-        price: parseFloat(form.price) || 0,
-        original_price: form.original_price ? parseFloat(form.original_price) : null,
-        promotional_price: form.promotional_price ? parseFloat(form.promotional_price) : null,
+        price,
+        original_price: originalPrice,
+        promotional_price: promotionalPrice,
         category_id: form.category_id || null,
         brand_id: form.brand_id || null,
         images: [...existingImages.map(image => image.url), ...images]
@@ -89,13 +146,18 @@ export default function ProductForm() {
         navigate(`/admin/produtos/${data.product.id}/editar`);
         return;
       }
-      // Refresh images if edit
+      // Uma falha do GET posterior não significa que o salvamento falhou.
       if (isEdit) {
-        const { data } = await api.get(`/store/products/${id}`);
-        setExistingImages(data.images || []);
-        setImages([]);
+        try {
+          const { data } = await api.get(`/store/products/${id}`);
+          setExistingImages(data.images || []);
+          setImages([]);
+        } catch {
+          toast.warning('Produto salvo, mas não foi possível atualizar as fotos na tela');
+        }
       }
-    } catch (err: any) { toast.error(err.response?.data?.error || 'Erro ao salvar'); } finally { setLoading(false); }
+    } catch (err: any) { toast.error(err.response?.data?.error || 'Erro ao salvar'); }
+    finally { savingRef.current = false; setLoading(false); }
   };
 
   const handleGenerateAI = async () => {
@@ -385,12 +447,12 @@ export default function ProductForm() {
 
             <label className="flex flex-col items-center justify-center h-28 rounded-xl border-2 border-dashed border-gray-200 hover:border-sky-300 hover:bg-sky-50 cursor-pointer transition-colors">
               {uploading ? <span className="text-sm text-gray-500">Enviando...</span> : <><Upload className="w-6 h-6 text-gray-400" /><span className="text-sm font-medium text-gray-600 mt-1">Enviar imagens</span><span className="text-xs text-gray-400">JPG, PNG, WEBP até 10MB</span></>}
-              <input type="file" accept="image/*" multiple className="hidden" onChange={handleImageUpload} disabled={uploading} />
+              <input type="file" accept="image/jpeg,image/png,image/webp,image/gif" multiple className="hidden" onChange={handleImageUpload} disabled={uploading || loading} />
             </label>
             <p className="text-xs text-gray-500 mt-2">A primeira imagem será a capa. Salve para aplicar as alterações.</p>
           </Card>
 
-          <Button type="submit" loading={loading} className="w-full" size="lg">
+          <Button type="submit" loading={loading} disabled={loading || uploading || aiUploading || aiLoading || applyingAI} className="w-full" size="lg">
             <Save className="w-4 h-4 mr-2" /> {isEdit ? 'Salvar Alterações' : 'Criar Produto'}
           </Button>
 
