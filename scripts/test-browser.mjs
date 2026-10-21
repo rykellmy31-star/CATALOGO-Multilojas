@@ -63,6 +63,64 @@ try {
   const publicImage = await fetch(base + url);
   assert.equal(publicImage.status, 200);
   assert.equal(publicImage.headers.get('Content-Type'), 'image/png');
+
+  // Homologação adicional com Worker + D1 + R2 locais (sem serviços reais).
+  const category = await api('/api/store/categories', 'POST', {
+    name: 'Categoria de Homologação'
+  }, token);
+  assert.equal(category.category.store_id, store.id, 'Categoria criada em loja incorreta');
+  const savedSettings = await api('/api/store/settings', 'PUT', {
+    description: 'Cadastro salvo no D1 local pelo teste de navegador'
+  }, token);
+  assert.equal(savedSettings.store.description,
+    'Cadastro salvo no D1 local pelo teste de navegador');
+
+  const scheduled = await api('/api/store/banners', 'POST', {
+    title: 'Campanha futura de homologação',
+    image_url: url,
+    starts_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString()
+  }, token);
+  let visible = await api(`/api/public/stores/${store.slug}/banners`);
+  assert(!visible.banners.some(banner => banner.id === scheduled.banner.id),
+    'Banner futuro não deve aparecer');
+  await api(`/api/store/banners/${scheduled.banner.id}`, 'PUT', {
+    starts_at: null, ends_at: null
+  }, token);
+  visible = await api(`/api/public/stores/${store.slug}/banners`);
+  assert(visible.banners.some(banner => banner.id === scheduled.banner.id),
+    'Banner deve aparecer após liberação do agendamento');
+  await api(`/api/store/banners/${scheduled.banner.id}`, 'PUT', {
+    is_active: false
+  }, token);
+  visible = await api(`/api/public/stores/${store.slug}/banners`);
+  assert(!visible.banners.some(banner => banner.id === scheduled.banner.id),
+    'Banner desativado não deve aparecer');
+
+  const anotherStore = await api('/api/superadmin/stores', 'POST', {
+    name: 'Loja Isolada de Homologação', slug: `isolada-${Date.now()}`
+  }, root.token);
+  const otherEmail = `gestor-${anotherStore.store.id}@browser.test`;
+  await api(`/api/superadmin/stores/${anotherStore.store.id}/admins`,
+    'POST', { name: 'Outro lojista', email: otherEmail, password }, root.token);
+  const otherSession = await api('/api/auth/login', 'POST', {
+    email: otherEmail, password
+  });
+  const foreignProduct = await fetch(`${base}/api/store/products/${productId}`, {
+    headers: { Authorization: `Bearer ${otherSession.token}` }
+  });
+  assert.equal(foreignProduct.status, 404,
+    'Outra loja não pode acessar o produto');
+  const foreignLogo = await fetch(`${base}/api/store/settings`, {
+    method: 'PUT',
+    headers: {
+      Authorization: `Bearer ${otherSession.token}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({ logo_url: url })
+  });
+  assert.equal(foreignLogo.status, 400,
+    'Outra loja não pode atribuir imagem R2 de terceiros');
+
   await page.goto(`${base}/loja/${store.slug}`);
   await page.getByRole('heading', { name: 'Produto de Teste' }).waitFor();
   await page.setViewportSize({ width: 390, height: 844 });
@@ -72,7 +130,7 @@ try {
   await page.getByRole('heading', { name: 'Produto de Teste' }).click();
   await page.waitForURL('**/produto/**');
   assert.equal(errors.length, 0, JSON.stringify(errors));
-  console.log('Aprovado: login, produto, prévia, R2 local, imagem pública, catálogo móvel e detalhe, sem erros JavaScript.');
+  console.log('Aprovado: login, produto, prévia, R2, configurações, categorias, campanhas, isolamento entre lojas, catálogo móvel e detalhe, sem erros JavaScript.');
 } finally {
   if (browser) await browser.close();
   try { process.kill(-server.pid, 'SIGTERM'); } catch {}
