@@ -170,7 +170,7 @@ upload.post('/', async (c) => {
         WHERE p.id = ? AND p.store_id = ?
       `).bind(crypto.randomUUID(), url, Math.round(file.size / 1024),
         productId, effectiveStoreId).run();
-      if (inserted.success === false || inserted.meta?.changes !== 1) {
+      if (inserted.meta?.changes !== 1) {
         throw new Error('Imagem não registrada no produto');
       }
     }
