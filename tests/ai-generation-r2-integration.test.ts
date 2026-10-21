@@ -120,7 +120,7 @@ describe('Integração local IA -> R2 -> histórico sem chamadas pagas', () => {
 
   it('não grava tokens ou resposta bruta do provedor no histórico de falhas', async () => {
     const calls = setup();
-    const confidential = 'sk-secret-mock-provider-response-not-for-users';
+    const confidential = 'sk-proj-' + 'TEST_FAKE_SECRET_'.repeat(3);
     mocks.edit.mockRejectedValueOnce(new Error(confidential));
     const response = await run();
     expect(response.status).toBe(500);
