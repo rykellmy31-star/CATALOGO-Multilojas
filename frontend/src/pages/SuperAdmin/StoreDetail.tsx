@@ -261,7 +261,7 @@ export default function StoreDetail() {
           </Button>
         </div>
 
-        {audit?.storeId === id && (
+        {audit && audit.storeId === id && (
           <div className="mt-5 space-y-4">
             <p className="text-xs text-gray-500">
               {audit.pages} página(s) analisada(s) • {audit.complete ? 'Varredura finalizada' : 'Varredura parcial'}
