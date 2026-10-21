@@ -374,12 +374,25 @@ superadmin.get('/stores/:id/support-view', async (c) => {
   const id = c.req.param('id');
   const user = c.get('user');
 
-  const store = await c.env.DB.prepare('SELECT * FROM stores WHERE id = ?').bind(id).first();
+  const store = await c.env.DB.prepare(
+    "SELECT * FROM stores WHERE id = ? AND status != 'deleted'"
+  ).bind(id).first();
   if (!store) return c.json({ error: 'Loja não encontrada' }, 404);
 
-  await c.env.DB.prepare(
-    'INSERT INTO audit_logs (user_id, store_id, action, entity_type, entity_id, details) VALUES (?, ?, ?, ?, ?, ?)'
-  ).bind(user.userId, id, 'support_view', 'store', id, JSON.stringify({ accessed_at: new Date().toISOString() })).run().catch(()=>{});
+  // Falhar fechado: nenhuma informação de suporte é enviada se a operação
+  // de auditoria não pôde ser confirmada pelo banco.
+  try {
+    const audit = await c.env.DB.prepare(
+      'INSERT INTO audit_logs (user_id, store_id, action, entity_type, entity_id, details) VALUES (?, ?, ?, ?, ?, ?)'
+    ).bind(user.userId, id, 'support_view', 'store', id,
+      JSON.stringify({ accessed_at: new Date().toISOString() })).run();
+    if (audit.meta?.changes !== 1) {
+      return c.json({ error: 'Auditoria indisponível. Acesso de suporte não realizado.' }, 503);
+    }
+  } catch {
+    return c.json({ error: 'Auditoria indisponível. Acesso de suporte não realizado.' }, 503);
+  }
+  c.header('Cache-Control', 'no-store');
 
   const products = await c.env.DB.prepare('SELECT COUNT(*) as count FROM products WHERE store_id = ?').bind(id).first() as any;
   const admins = await c.env.DB.prepare('SELECT id, name, email, last_login_at FROM users WHERE store_id = ?').bind(id).all();
