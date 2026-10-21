@@ -1,4 +1,5 @@
 import { describe,it,expect,afterEach } from 'vitest';
+import { app } from '../backend/src/index';
 import { fixture } from './helpers';
 import { hashPassword,verifyPassword } from '../backend/src/utils/hash';
 let f:ReturnType<typeof fixture>;afterEach(()=>f?.db.close());
@@ -27,6 +28,24 @@ describe('API real',()=>{
   it('hash real tem salt e rejeita senha incorreta',async()=>{
     f=fixture();
     const h=await hashPassword('Password123');expect(await verifyPassword('Password123',h)).toBe(true);expect(await verifyPassword('wrong',h)).toBe(false);expect(await hashPassword('Password123')).not.toBe(h);
+  });
+  it('segredos JWT ausentes ou fracos bloqueiam login e setup sem tocar no D1', async () => {
+    f = fixture();
+    for (const secret of ['', 'curto']) {
+      for (const [path, body] of [
+        ['/api/auth/login', { email: 'a@test.com', password: 'Password123' }],
+        ['/api/auth/setup-super-admin', { setupToken: 'qualquer', name: 'Novo', email: 'novo@test.com', password: 'Password123' }]
+      ] as const) {
+        const response = await app.request(path, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body)
+        }, { ...f.env, JWT_SECRET: secret } as any);
+        expect(response.status).toBe(503);
+        expect((await response.json()).error).toBe('Autenticação indisponível.');
+      }
+    }
+    expect(f.db.prepare('SELECT COUNT(*) AS n FROM auth_rate_limits').get()?.n).toBe(0);
   });
   it('limita tentativas de login com contador persistente',async()=>{
     f=fixture();

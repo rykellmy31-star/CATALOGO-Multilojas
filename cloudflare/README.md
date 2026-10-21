@@ -1,32 +1,11 @@
-# Configuração Cloudflare
+# Cloudflare — recursos e segurança
 
-## Recursos necessários
+A configuração de `wrangler.toml` declara um Worker, um banco D1 (`catalogos_db`), dois buckets R2 (`STORAGE` e `STORAGE_PUBLIC`) e Worker Assets para o frontend.
 
-- 1 Worker (catalogos-saas)
-- 1 D1 Database (catalogos_db)
-- 2 R2 Buckets (catalogos-storage, catalogos-public)
-- Domínio customizado (opcional)
+Os IDs/buckets existentes no repositório são exemplos para desenvolvimento. **Não** correspondem necessariamente a recursos da conta do proprietário. A criação/configuração de recursos remotos pode gerar custos e exige autorização prévia.
 
-## Secrets
+Secrets mínimos: `JWT_SECRET` e `SUPER_ADMIN_SETUP_TOKEN`; IA desativada por padrão (`AI_ENABLED=false`). Nunca commitar credenciais ou expor publicamente `STORAGE`.
 
-```
-JWT_SECRET
-OPENAI_API_KEY
-SUPER_ADMIN_SETUP_TOKEN
-```
+O cron de limpeza configurado é **horário** (`0 * * * *`) e remove rate limits expirados e eventos antigos de analytics. Reavaliar retenção e alertas em homologação.
 
-Definir via `wrangler secret put <NOME>`
-
-## Vars (wrangler.toml)
-
-```
-PLATFORM_NAME
-AI_PROVIDER
-AI_ENABLED
-ENVIRONMENT
-R2_PUBLIC_URL
-```
-
-## Cron
-
-Limpeza diária de analytics antigos (configurado em wrangler.toml).
+Procedimento de instalação e migração remota, backups, CORS e liberação comercial: `docs/CLOUDFLARE.md` e `docs/HOMOLOGACAO-COMERCIAL.md`. O CI somente valida a branch de desenvolvimento, sem deploy.
