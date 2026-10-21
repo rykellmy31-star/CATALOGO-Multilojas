@@ -24,6 +24,12 @@ describe('Super Admin: segurança da auditoria paginada', () => {
     expect(page).not.toContain('audit.result.reconciliation');
   });
 
+  it('não acessa campos de auditoria nula ao trocar de loja', () => {
+    expect(page).toContain('{audit && audit.storeId === id && (');
+    expect(page).toContain('setAudit(null)');
+    expect(page).toContain('auditProgressRef.current = null');
+  });
+
   it('descarta resultados atrasados ao navegar entre lojas', () => {
     expect(page).toContain('controller.abort()');
     expect(page).toContain('currentStoreIdRef.current !== requestedId');
