@@ -106,16 +106,24 @@ superadmin.post('/stores', zValidator('json', createStoreSchema), async (c) => {
     data.ai_daily_limit ?? 10, data.ai_monthly_limit ?? 100
   );
 
-  const result = await insert(baseSlug);
+  // D1 e diferentes adapters de SQLite podem expor metadados de
+  // alteração distintos. A prova de criação é a existência do ID gerado.
+  await insert(baseSlug);
   let slug = baseSlug;
-  if (result.meta?.changes !== 1) {
+  let created = await c.env.DB.prepare(
+    'SELECT id FROM stores WHERE id = ?'
+  ).bind(storeId).first();
+  if (!created) {
     if (explicitSlug) {
       return c.json({ error: 'Endereço da loja já utilizado' }, 409);
     }
     // O UUID elimina colisões por timestamp e suporta cadastro simultâneo.
     slug = `${baseSlug}-${storeId}`;
-    const retry = await insert(slug);
-    if (retry.meta?.changes !== 1) {
+    await insert(slug);
+    created = await c.env.DB.prepare(
+      'SELECT id FROM stores WHERE id = ?'
+    ).bind(storeId).first();
+    if (!created) {
       return c.json({ error: 'Não foi possível gerar endereço exclusivo' }, 409);
     }
   }
