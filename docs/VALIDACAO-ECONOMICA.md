@@ -1,13 +1,50 @@
-# Validação local sem execuções automáticas
+# Validação segura e econômica — Catálogo Multiloja
 
-Regra vigente: trabalhar sem gerar custos extras. Testes e build são executados no ambiente de desenvolvimento antes de enviar os commits. Não disparar GitHub Actions, serviços pagos, contratação de planos, cadastro de pagamento ou aumento de orçamento. Se uma etapa exigir pagamento, suspender somente essa etapa, explicar alternativa gratuita e continuar as demais tarefas locais.
+O repositório é público. O proprietário autorizou GitHub Actions em executores
+padrão para a branch `desenvolvimento/seguranca-e-implantacao`, sem despesas
+extras, alteração da `main` ou deploy automático.
 
-Executar `npm run validate` para auditoria estática, testes de integração e build frontend/backend. Quando houver mudanças de banco ou configuração Cloudflare, validar migrações e empacotamento apenas localmente. Não publicar nem usar banco remoto ou chaves reais. Chromium é opcional e pode ser executado localmente quando disponível; não solicitar execução em runner hospedado como alternativa automática.
+## Como a validação é executada
 
-O workflow possui SOMENTE workflow_dispatch. Não possui gatilhos push, pull_request, rótulos ou agendamento. Envio de commits, abertura/atualização do PR e transição para pronto não solicitam validação de Actions. O rótulo validar-agora não tem mais efeito.
+- Commits normais na branch de desenvolvimento disparam um workflow de CI.
+- Commits com `[skip ci]` não disparam o CI: úteis para ajustes intermediários.
+- Acrescente `[browser ci]` à mensagem do commit final da rodada para também
+  executar Chromium e os fluxos de D1/R2 inteiramente locais.
+- `workflow_dispatch` permite executar manualmente e selecionar `navegador`,
+  quando disponível no GitHub. O workflow existe na branch de desenvolvimento;
+  o botão manual pode não aparecer enquanto ela não for a branch padrão.
+- O CI só usa `ubuntu-latest` e permissões `contents: read`. Não acessa
+  bancos remotos, não gera imagens em APIs comerciais e não publica o Worker.
 
-A definição de validação manual foi preservada, com navegador opcional. Ela não foi acionada. O GitHub exige que o arquivo esteja na branch padrão para mostrar o botão Run workflow; hoje ele está apenas na branch de desenvolvimento. A main não será alterada para habilitar o botão sem autorização. Enquanto isso, a alternativa sem Actions é npm run validate no ambiente de desenvolvimento e revisão das evidências registradas no PR.
+## Etapas obrigatórias
 
-Uma eventual execução manual hospedada pode consumir a franquia de minutos do GitHub. Não presumir gratuidade nem iniciar sem autorização específica compatível com o limite de custos. Não configurar cobrança para viabilizá-la.
+1. `python3 scripts/auditar-seguranca.py`: verifica arquivos sigilosos
+   versionados, segredos conhecidos, configurações e autenticação básica.
+2. `npm ci`: restaura dependências exatamente como no lockfile.
+3. `npm audit --audit-level=moderate`: avalia vulnerabilidades.
+4. `npm test`: executa Vitest e regressões multiloja.
+5. `npm run build`: checa tipos e empacota frontend e backend.
+6. `npm run db:migrate`: aplica migrações **somente no D1 local**.
+7. `npx wrangler deploy --dry-run --env='' --outdir /tmp/catalogo-worker`:
+   verifica o empacotamento sem implantar.
+8. Opcionalmente, `npm run test:browser`: Chromium, dados fictícios, Worker,
+   D1 e R2 locais. Evidências em artefatos da execução.
 
-Antes de integrar à main, revisar as evidências locais do SHA candidato e o resultado da validação manual que for autorizada. O workflow continua contendo auditoria de dependências, testes, build, D1 local, empacotamento sem publicação e Chromium opcional, sem ativar execução automática. A conexão disponível não permite confirmar ou alterar a proteção da main (403). Nenhum check obrigatório ou proteção é presumido, removido ou modificado por esta alteração.
+Uma falha interrompe as etapas posteriores. O resultado verde significa
+aprovação dessa revisão do código, não validação de credenciais, cotas e
+integrações de produção.
+
+## Limites obrigatórios
+
+Não há autorização para runners maiores pagos, assinatura, métodos de
+pagamento, uso real de IA paga, deploy em produção, exclusão de dados ou
+migrações remotas. Se um ambiente real pedir cobrança, parar só aquela etapa
+e continuar testes locais. O PR deve permanecer sem merge até a autorização
+para integrar à `main`.
+
+## Homologação comercial
+
+Ver `docs/HOMOLOGACAO-COMERCIAL.md` para as verificações externas ainda
+necessárias: recursos Cloudflare próprios, segredos, domínio, permissões,
+acesso de lojistas, apresentação em navegadores/dispositivos reais,
+auditoria e aprovação comercial.
