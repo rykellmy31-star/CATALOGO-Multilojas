@@ -7,7 +7,7 @@ import { Save, Upload, ExternalLink, Palette } from 'lucide-react';
 import { toast } from 'sonner';
 
 export default function Settings() {
-  const [store, setStore] = useState<any>({});
+  const [store, setStore] = useState<Record<string, any>>({});
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [uploadingLogo, setUploadingLogo] = useState(false);
@@ -30,7 +30,7 @@ export default function Settings() {
     try {
       const { data } = await api.put('/store/settings', submittedStore);
       // Uma resposta antiga não pode apagar alterações feitas enquanto salvava.
-      setStore(current => Object.keys(submittedStore).some(key => current[key] !== submittedStore[key])
+      setStore(current => Object.entries(submittedStore).some(([key, value]) => current[key] !== value)
         ? current : data.store);
       toast.success('Configurações salvas!');
     } catch (e: any) {
