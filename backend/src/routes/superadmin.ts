@@ -338,8 +338,17 @@ superadmin.put('/platform-config', zValidator('json', updatePlatformConfigSchema
 
 // GET /api/superadmin/audit-logs
 superadmin.get('/audit-logs', async (c) => {
-  const page = Math.max(1, Number.parseInt(c.req.query('page') || '1') || 1);
-  const limit = Math.min(100, Math.max(1, Number.parseInt(c.req.query('limit') || '20') || 20));
+  // Não permitir coerções como "1abc", negativos, expoentes ou inteiros
+  // gigantes que causariam erro de binding e retornos 500 do SQLite/D1.
+  const parsePositiveInt = (raw: string | undefined, fallback: number, max: number) => {
+    if (raw === undefined) return fallback;
+    if (!/^[1-9][0-9]{0,4}$/.test(raw)) return null;
+    const parsed = Number(raw);
+    return Number.isSafeInteger(parsed) && parsed <= max ? parsed : null;
+  };
+  const page = parsePositiveInt(c.req.query('page'), 1, 10000);
+  const limit = parsePositiveInt(c.req.query('limit'), 20, 100);
+  if (page === null || limit === null) return c.json({ error: 'Paginação inválida' }, 400);
   const offset = (page - 1) * limit;
 
   const logs = await c.env.DB.prepare(`
@@ -351,6 +360,8 @@ superadmin.get('/audit-logs', async (c) => {
   `).bind(limit, offset).all();
 
   const total = await c.env.DB.prepare('SELECT COUNT(*) as count FROM audit_logs').first() as any;
+  // Log de suporte pode conter dados pessoais; não armazenar em cache.
+  c.header('Cache-Control', 'no-store');
 
   return c.json({ 
     logs: (logs as any).results || logs,
