@@ -104,15 +104,11 @@ superadmin.post('/stores', zValidator('json', createStoreSchema), async (c) => {
     data.plan || 'free', data.status || 'active',
     data.storage_limit_mb ?? 1024, data.ai_enabled === false ? 0 : 1,
     data.ai_daily_limit ?? 10, data.ai_monthly_limit ?? 100
-  );
+  ).run();
 
   // D1 e diferentes adapters de SQLite podem expor metadados de
   // alteração distintos. A prova de criação é a existência do ID gerado.
-  const firstInsertion = await insert(baseSlug);
-  // Instrumentação temporária para investigar o comportamento SQLite no CI.
-  console.warn('[ci-debug-store]', JSON.stringify({
-    attempted_slug: baseSlug, inserted_changes: firstInsertion.meta?.changes
-  }));
+  await insert(baseSlug);
   let slug = baseSlug;
   let created = await c.env.DB.prepare(
     'SELECT id FROM stores WHERE id = ?'
@@ -123,10 +119,7 @@ superadmin.post('/stores', zValidator('json', createStoreSchema), async (c) => {
     }
     // O UUID elimina colisões por timestamp e suporta cadastro simultâneo.
     slug = `${baseSlug}-${storeId}`;
-    const secondInsertion = await insert(slug);
-    console.warn('[ci-debug-store-retry]', JSON.stringify({
-      attempted_slug: slug, inserted_changes: secondInsertion.meta?.changes
-    }));
+    await insert(slug);
     created = await c.env.DB.prepare(
       'SELECT id FROM stores WHERE id = ?'
     ).bind(storeId).first();
