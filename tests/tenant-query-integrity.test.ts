@@ -13,6 +13,15 @@ const foreignImage = 'https://cdn.example.com/b-private.png';
 
 function contaminatedFixture() {
   f = fixture();
+  // Simula um banco legado anterior à migração 004: as triggers abaixo
+  // existem em produção e BLOQUEIAM relações cruzadas. Apenas esta cópia
+  // em memória remove as proteções para testar leitura defensiva de legado.
+  f.db.exec(`
+    DROP TRIGGER tenant_products_category_id_update;
+    DROP TRIGGER tenant_products_brand_id_update;
+    DROP TRIGGER tenant_product_images_product_id_insert;
+    DROP TRIGGER tenant_analytics_events_product_id_insert;
+  `);
   f.db.prepare(
     "UPDATE products SET category_id='cb', brand_id='brand-b', is_featured=1, is_on_sale=1 WHERE id='pa'"
   ).run();
@@ -33,6 +42,19 @@ async function get(path: string, authenticated = false) {
 }
 
 describe('Consultas da vitrine e do painel não cruzam lojas', () => {
+  it('migração 004 impede relações cruzadas em gravações reais', () => {
+    f = fixture();
+    expect(() => f!.db.prepare(
+      "UPDATE products SET category_id='cb' WHERE id='pa'"
+    ).run()).toThrow(/tenant relation mismatch/);
+    expect(() => f!.db.prepare(
+      "INSERT INTO product_images (id,product_id,store_id,url) VALUES ('foreign','pa','b','https://example.com/foreign.jpg')"
+    ).run()).toThrow(/tenant relation mismatch/);
+    expect(() => f!.db.prepare(
+      "INSERT INTO analytics_events (id,store_id,product_id,event_type) VALUES ('foreign-event','a','pb','product_view')"
+    ).run()).toThrow(/tenant relation mismatch/);
+  });
+
   it('home só mostra foto da própria loja em destaques e promoções', async () => {
     contaminatedFixture();
     const home = await get('/api/public/stores/loja-a');
