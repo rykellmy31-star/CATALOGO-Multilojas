@@ -816,7 +816,7 @@ store.put('/settings', zValidator('json', updateStoreSettingsSchema), async (c) 
   }
   const user = c.get('user');
 
-  for (const field of ['logo_url', 'banner_url', 'website', 'facebook']) {
+  for (const field of ['logo_url', 'banner_url', 'website', 'facebook'] as const) {
     const value = data[field];
     if (value !== undefined && value !== null && value !== '' &&
         !publicLinkSchema.safeParse(value).success) {
