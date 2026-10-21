@@ -167,7 +167,13 @@ describe('Edição transacional de produtos e imagens', () => {
 
   it('leitura de fotos ignora linha com store_id incompatível com a loja do produto', async () => {
     seed();
-    // Referência legada/corrompida: product_id pertence a A, mas imagem marcada B.
+    // A migração 004 rejeita essa gravação. Desabilitar a trigger apenas
+    // nesta fixture em memória para testar leitura defensiva do legado.
+    expect(() => f!.db.prepare(`
+      INSERT INTO product_images (id, product_id, store_id, url)
+      VALUES ('bad-write', 'pa', 'b', 'https://example.com/blocked.png')
+    `).run()).toThrow(/tenant relation mismatch/);
+    f!.db.exec('DROP TRIGGER tenant_product_images_product_id_insert');
     f!.db.prepare(`
       INSERT INTO product_images (id, product_id, store_id, url)
       VALUES ('wrong-tenant-image', 'pa', 'b', 'https://example.com/private-b.png')
