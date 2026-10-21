@@ -47,14 +47,16 @@ jobs:
         run: npx wrangler deploy --dry-run --env='' --outdir /tmp/catalogo-worker
         env:
           WRANGLER_SEND_METRICS: false
+      # Execução pesada de navegador somente quando explicitamente solicitada
+      # no dispatch ou quando o commit contém o marcador [browser ci].
       - name: Instalar navegador de testes
-        if: inputs.navegador
+        if: inputs.navegador || (github.event_name == 'push' && contains(github.event.head_commit.message, '[browser ci]'))
         run: npx playwright install --with-deps chromium
       - name: Validar fluxos no navegador e R2 local
-        if: inputs.navegador
+        if: inputs.navegador || (github.event_name == 'push' && contains(github.event.head_commit.message, '[browser ci]'))
         run: npm run test:browser
       - name: Preservar evidências de validação
-        if: always() && (inputs.navegador)
+        if: always() && (inputs.navegador || (github.event_name == 'push' && contains(github.event.head_commit.message, '[browser ci]')))
         uses: actions/upload-artifact@v4
         with:
           name: validacao-navegador
