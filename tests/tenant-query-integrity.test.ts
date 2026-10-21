@@ -51,6 +51,9 @@ describe('Consultas da vitrine e do painel não cruzam lojas', () => {
       "INSERT INTO product_images (id,product_id,store_id,url) VALUES ('foreign','pa','b','https://example.com/foreign.jpg')"
     ).run()).toThrow(/tenant relation mismatch/);
     expect(() => f!.db.prepare(
+      "UPDATE products SET brand_id='brand-b' WHERE id='pa'"
+    ).run()).toThrow(/tenant relation mismatch/);
+    expect(() => f!.db.prepare(
       "INSERT INTO analytics_events (id,store_id,product_id,event_type) VALUES ('foreign-event','a','pb','product_view')"
     ).run()).toThrow(/tenant relation mismatch/);
   });
