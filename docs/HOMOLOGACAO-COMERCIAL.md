@@ -17,11 +17,41 @@ Etapas obrigatórias:
 5. Compilar frontend e backend com `npm run build`.
 6. Aplicar migrações **somente no D1 local**, com `npm run db:migrate`.
 7. Validar o Worker com `wrangler deploy --dry-run` (sem publicar).
-8. Quando a validação de navegador estiver habilitada, executar
-   `npm run test:browser` com Chromium e serviços locais.
+8. Para a homologação de navegador, incluir `[browser ci]` no commit
+   de validação ou selecionar `navegador` na execução manual. A suíte usa
+   Chromium, D1 e R2 locais, com evidências anexadas no GitHub Actions.
 
 Não confundir os resultados da suíte automatizada com a homologação de
 produção: migração, armazenamento e IA reais exigem ambiente autorizado.
+
+## Evidências automatizadas
+
+A aprovação da execução do GitHub Actions no SHA candidato é pré-requisito.
+O último ciclo verde confirmado nesta revisão teve **651 testes Vitest
+aprovados, build frontend/backend, auditoria de dependências, D1 local,
+Worker dry-run, Chromium e R2 local**.
+
+A aprovação não comprova que o `database_id` e os buckets exemplificativos
+de `wrangler.toml` existam na conta Cloudflare do proprietário.
+
+## Dependências para homologação e publicação futura
+
+- Configurar, com autorização, IDs reais do D1 e buckets `STORAGE` e
+  `STORAGE_PUBLIC`, com permissões mínimas necessárias e backups.
+- Associar domínio/HTTPS, origem CORS exata e segredos do Worker
+  (`JWT_SECRET`, `SUPER_ADMIN_SETUP_TOKEN`); nunca commitar valores.
+- Aplicar as migrações no ambiente autorizado, após backup e validação
+  do plano de reversão. Não aplicar migrations no banco real por CI.
+- Confirmar que o bucket privado não possui URL pública irrestrita; auditar
+  acesso à mídia, cotas e segregação entre lojistas.
+- Homologar cadastro, reset de senha, configurações, banner, catálogo e
+  carregamento de imagens com pelo menos dois lojistas de teste.
+- Validar em dispositivos reais, verificar observabilidade, domínio,
+  consentimentos necessários e procedimentos de suporte/restauração.
+- IA paga continua desabilitada até aprovação de custo, modelo suportado,
+  credencial autorizada, cotas e testes de falha sem geração real em CI.
+- Exigir autorização específica antes de fazer deploy, alterar `main`
+  ou abrir acesso a clientes pagantes.
 
 ## Fluxos de homologação manual, em ambiente de teste
 
