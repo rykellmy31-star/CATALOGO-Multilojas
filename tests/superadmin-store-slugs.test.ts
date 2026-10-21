@@ -18,17 +18,22 @@ describe('Super Admin: endereço único e limites iniciais das lojas', () => {
   it('cria loja com slug vazio, gerado pelo nome, como sugere o formulário', async () => {
     const { create } = setup();
     const response = await create({ name: 'Móveis Premium', slug: '' });
-    if (response.status !== 201) {
-      const diagnostic = await response.clone().json();
-      const rows = f!.db.prepare('SELECT id, slug FROM stores ORDER BY slug').all();
-      console.warn('Diagnóstico de criação (sem credenciais):', response.status, diagnostic, rows);
-    }
     expect(response.status).toBe(201);
     const { store } = await response.json() as any;
     expect(store.slug).toBe('moveis-premium');
     expect(store.storage_limit_mb).toBe(1024);
     expect(store.ai_daily_limit).toBe(10);
     expect(store.ai_monthly_limit).toBe(100);
+  });
+
+  it('executa realmente o INSERT e mantém a loja registrada no banco', async () => {
+    const { create } = setup();
+    const response = await create({ name: 'Loja Persistente', slug: 'loja-persistente' });
+    expect(response.status).toBe(201);
+    const { store } = await response.json() as any;
+    expect(store.slug).toBe('loja-persistente');
+    expect(f!.db.prepare('SELECT name,slug FROM stores WHERE id = ?').get(store.id))
+      .toMatchObject({ name: 'Loja Persistente', slug: 'loja-persistente' });
   });
 
   it('respeita os limites informados na criação, inclusive IA desabilitada', async () => {
