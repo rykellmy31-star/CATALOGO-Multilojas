@@ -62,6 +62,7 @@ de `wrangler.toml` existam na conta Cloudflare do proprietário.
 - Criar banner, programar início/fim, ativar/desativar, observar a vitrine.
 - Validar busca, filtros, preço promocional e links do WhatsApp.
 - Validar formulários em celular e computador, incluindo estados de erro.
+- No Chromium local, confirmar gravação de configurações e categorias, janela de banners e acesso negado de outro lojista a produto e imagem no R2.
 - Conferir quotas, trilha de auditoria e mensagens sem expor credenciais.
 
 ## Integrações e faturamento
