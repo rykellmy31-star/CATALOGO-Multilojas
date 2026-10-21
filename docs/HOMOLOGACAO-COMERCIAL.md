@@ -64,6 +64,11 @@ de `wrangler.toml` existam na conta Cloudflare do proprietário.
 - Validar formulários em celular e computador, incluindo estados de erro.
 - No Chromium local, confirmar gravação de configurações e categorias, janela de banners e acesso negado de outro lojista a produto e imagem no R2.
 - Conferir quotas, trilha de auditoria e mensagens sem expor credenciais.
+- A consulta global de auditoria exige superadministrador, paginação válida e
+  resposta sem cache; números negativos, não inteiros ou excessivos retornam 400.
+- O acesso a informações de suporte deve gerar registro de auditoria **antes**
+  de entregar dados. Se o D1 recusar esse registro, a API deve responder 503,
+  sem nomes de administradores, produtos ou detalhes da loja.
 
 ## Integrações e faturamento
 
