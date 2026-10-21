@@ -1,0 +1,66 @@
+name: Validar projeto
+on:
+  push:
+    branches:
+      - desenvolvimento/seguranca-e-implantacao
+  workflow_dispatch:
+    inputs:
+      navegador:
+        description: Executar também Chromium e R2 local
+        type: boolean
+        default: false
+concurrency:
+  group: validar-${{ github.ref_name }}
+  cancel-in-progress: true
+permissions:
+  contents: read
+jobs:
+  validar:
+    name: ${{ github.event_name == 'workflow_dispatch' && !inputs.navegador && 'validar-basico-manual' || 'validar' }}
+    # Somente push na branch de desenvolvimento ou execução manual.
+    # Commits com [skip ci] não acionam a validação automática.
+    timeout-minutes: 15
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Confirmar importação do código
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f package.json || { echo "::error::Código-fonte ainda não importado"; exit 1; }
+          test -f package-lock.json || { echo "::error::Lockfile ausente"; exit 1; }
+          test -f backend/src/routes/auth.ts || { echo "::error::API de autenticação ausente"; exit 1; }
+      - name: Auditar segurança e validar detector de segredos
+        run: |
+          python3 scripts/auditar-seguranca.py
+          python3 scripts/test-auditar-seguranca.py
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - name: Auditar dependências
+        run: npm audit --audit-level=moderate
+      - run: npm test
+      - run: npm run build
+      - name: Validar migrações no D1 local
+        run: npm run db:migrate
+      - name: Validar empacotamento sem publicar
+        run: npx wrangler deploy --dry-run --env='' --outdir /tmp/catalogo-worker
+        env:
+          WRANGLER_SEND_METRICS: false
+      # Execução pesada de navegador somente quando explicitamente solicitada
+      # no dispatch ou quando o commit contém o marcador [browser ci].
+      - name: Instalar navegador de testes
+        if: inputs.navegador || (github.event_name == 'push' && contains(github.event.head_commit.message, '[browser ci]'))
+        run: npx playwright install --with-deps chromium
+      - name: Validar fluxos no navegador e R2 local
+        if: inputs.navegador || (github.event_name == 'push' && contains(github.event.head_commit.message, '[browser ci]'))
+        run: npm run test:browser
+      - name: Preservar evidências de validação
+        if: always() && (inputs.navegador || (github.event_name == 'push' && contains(github.event.head_commit.message, '[browser ci]')))
+        uses: actions/upload-artifact@v4
+        with:
+          name: validacao-navegador
+          path: test-results/
+          retention-days: 7
